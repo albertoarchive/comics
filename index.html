@@ -659,9 +659,16 @@ function coverUrl(m){
 const coverStyle = m => { const u = coverUrl(m); return u ? `style="background-image:url('${u}')"` : ''; };
 const phLetter = m => esc((m.series||'?').trim().charAt(0).toUpperCase());
 
+/* clave de agrupación: ignora mayúsculas, tildes, signos, "Star Wars" delante y artículos */
+function skey(name){
+  let n = String(name).normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/&/g,' y ').replace(/[^a-z0-9 ]+/g,' ').replace(/\s+/g,' ').trim();
+  const strip = (re) => { const t = n.replace(re,'').trim(); if(t) n = t; };
+  strip(/^star wars\b/); strip(/^(el|la|los|las|the|un|una)\b/);
+  return n;
+}
 function groupSeries(list){
   const g = new Map();
-  list.forEach(m=>{ const k = m.series.toLowerCase(); if(!g.has(k)) g.set(k,{name:m.series,items:[]}); g.get(k).items.push(m); });
+  list.forEach(m=>{ const k = skey(m.series); if(!g.has(k)) g.set(k,{key:k,name:m.series,items:[]}); g.get(k).items.push(m); });
   g.forEach(s => s.items.sort(byIssue));
   return [...g.values()].sort((a,b)=>collator.compare(a.name,b.name));
 }
@@ -694,7 +701,7 @@ function render(){
   }
 
   if(view.name==='series'){
-    const s = groupSeries(lib).find(x=>x.name.toLowerCase()===view.series.toLowerCase());
+    const s = groupSeries(lib).find(x=>x.key===skey(view.series));
     if(!s){ view = {name:'home', era:'all'}; return render(); }
     let items = s.items.slice(); if(view.desc) items.reverse();
     const cont = nextToRead(s.items);
@@ -728,7 +735,7 @@ function render(){
   main.querySelectorAll('[data-series]').forEach(el=>el.onclick = () => { view = {name:'series', series:el.dataset.series, desc:false, era:view.era}; q.text=''; $('q').value=''; render(); window.scrollTo(0,0); });
   main.querySelectorAll('[data-era]').forEach(el=>el.onclick = () => { view.era = el.dataset.era; render(); });
   const back = $('back'); if(back) back.onclick = () => { view={name:'home', era:view.era}; render(); };
-  const gr = $('goRead'); if(gr) gr.onclick = () => { const s = groupSeries(lib).find(x=>x.name.toLowerCase()===view.series.toLowerCase()); openComic(nextToRead(s.items).id); };
+  const gr = $('goRead'); if(gr) gr.onclick = () => { const s = groupSeries(lib).find(x=>x.key===skey(view.series)); openComic(nextToRead(s.items).id); };
   const sd = $('sortDir'); if(sd) sd.onclick = () => { view.desc = !view.desc; render(); };
   const rs = $('renSeries'); if(rs) rs.onclick = renameSeries;
 }
@@ -777,14 +784,14 @@ async function editComic(id){
   render();
 }
 async function renameSeries(){
-  const old = view.series, first = lib.find(x=>x.series.toLowerCase()===old.toLowerCase());
+  const old = view.series, first = lib.find(x=>skey(x.series)===skey(old));
   const r = await modal({title:'Editar serie', fields:[
       {id:'n',label:'Nombre de la serie',value:old,list:true},
       {id:'era',label:'Era',type:'select',value:eraOf(first),options:ERAS.map(e=>[e.id,e.name])}],
     actions:[{id:'cancel',label:'Cancelar'},{id:'save',label:'Guardar',cls:'pri'}]});
   if(!r || r.action!=='save') return;
   const nn = r.vals.n.trim() || old;
-  for(const m of lib.filter(x=>x.series.toLowerCase()===old.toLowerCase())){ m.series = nn; m.era = r.vals.era; m.manual = true; await DB.put(m); }
+  for(const m of lib.filter(x=>skey(x.series)===skey(old))){ m.series = nn; m.era = r.vals.era; m.manual = true; await DB.put(m); }
   view.series = nn; render();
 }
 
@@ -868,7 +875,7 @@ function go(d){
 }
 function goPage(p){ S.si = spreadOf(p); renderPage(); }
 function nextIssue(){
-  const s = groupSeries(lib).find(x=>x.name.toLowerCase()===S.m.series.toLowerCase());
+  const s = groupSeries(lib).find(x=>x.key===skey(S.m.series));
   if(!s) return;
   const i = s.items.findIndex(x=>x.id===S.m.id), nx = s.items[i+1];
   if(nx){ DB.put(S.m).catch(()=>{}); openComic(nx.id); }

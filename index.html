@@ -631,10 +631,10 @@ async function importFiles(fileList){
 /* =====================================================
    MODAL
    ===================================================== */
-function modal({title, fields=[], actions}){
+function modal({title, text='', fields=[], actions}){
   return new Promise(resolve => {
     const box = $('mbox');
-    box.innerHTML = `<h3>${esc(title)}</h3>` + fields.map(f=> f.type==='select'
+    box.innerHTML = `<h3>${esc(title)}</h3>` + (text?`<p style="color:var(--mute);font-size:13.5px;line-height:1.5">${esc(text)}</p>`:'') + fields.map(f=> f.type==='select'
         ? `<label for="m_${f.id}">${esc(f.label)}</label><select id="m_${f.id}">${f.options.map(o=>`<option value="${esc(o[0])}" ${o[0]===f.value?'selected':''}>${esc(o[1])}</option>`).join('')}</select>`
         : `<label for="m_${f.id}">${esc(f.label)}</label><input id="m_${f.id}" type="${f.type||'text'}" value="${esc(f.value??'')}" ${f.list?'list="m_list"':''} autocomplete="off">`).join('')
       + `<datalist id="m_list">${[...new Set(lib.map(m=>m.series))].sort(collator.compare).map(s=>`<option value="${esc(s)}">`).join('')}</datalist>`
@@ -723,6 +723,7 @@ function render(){
       <div style="--ec:${eraCol(eraOf(s.items[0]))}"><h1>${esc(s.name)}</h1><div class="era">${esc(ERA[eraOf(s.items[0])].name)}</div><p>${s.items.length} número${s.items.length>1?'s':''} · ${done} leído${done!==1?'s':''}</p>
       <div class="row"><button class="btn pri" id="goRead">▶ ${cont.pos>0&&!cont.read?'Continuar':'Empezar'} ${esc(issueLabel(cont))}</button>
       <button class="btn" id="renSeries">Editar serie</button>
+      <button class="btn danger" id="delSeries">Eliminar serie</button>
       <button class="btn ${view.desc?'on':''}" id="sortDir">${view.desc?'Más nuevo primero':'Más antiguo primero'}</button></div></div></div>
       <div class="grid">${items.map(m=>tile(m)).join('')}</div>`;
   } else {
@@ -752,16 +753,18 @@ function render(){
   const bar = $('selbar');
   if(view.sel && view.name==='home'){
     const n = view.sel.size;
-    bar.innerHTML = `<span>${n} serie${n!==1?'s':''} seleccionada${n!==1?'s':''}</span><button class="btn" id="selAll">Todas las visibles</button><button class="btn pri" id="selMerge" ${n<2?'disabled style="opacity:.45"':''}>Fusionar</button><button class="btn" id="selCancel">Cancelar</button>`;
+    bar.innerHTML = `<span>${n} serie${n!==1?'s':''} seleccionada${n!==1?'s':''}</span><button class="btn" id="selAll">Todas las visibles</button><button class="btn pri" id="selMerge" ${n<2?'disabled style="opacity:.45"':''}>Fusionar</button><button class="btn danger" id="selDel" ${n<1?'disabled style="opacity:.45"':''}>Eliminar</button><button class="btn" id="selCancel">Cancelar</button>`;
     bar.style.display='flex';
     $('selAll').onclick = () => { groupSeries(list).filter(x=>view.era==='all'||eraOf(x.items[0])===view.era).forEach(x=>view.sel.add(x.key)); render(); };
     $('selCancel').onclick = () => { view.sel = null; render(); };
     $('selMerge').onclick = () => { if(view.sel.size>=2) mergeSelected(); };
+    $('selDel').onclick = () => { if(view.sel.size>=1) deleteSeries([...view.sel]); };
   } else bar.style.display='none';
   const back = $('back'); if(back) back.onclick = () => { view={name:'home', era:view.era}; render(); };
   const gr = $('goRead'); if(gr) gr.onclick = () => { const s = groupSeries(lib).find(x=>x.key===skey(view.series)); openComic(nextToRead(s.items).id); };
   const sd = $('sortDir'); if(sd) sd.onclick = () => { view.desc = !view.desc; render(); };
   const rs = $('renSeries'); if(rs) rs.onclick = renameSeries;
+  const ds = $('delSeries'); if(ds) ds.onclick = () => deleteSeries([skey(view.series)]);
 }
 function nextToRead(items){
   return items.find(m=>m.pos>0&&!m.read) || items.find(m=>!m.read) || items[0];
@@ -807,6 +810,27 @@ async function editComic(id){
   }
   render();
 }
+async function deleteSeries(keys){
+  const groups = groupSeries(lib).filter(g=>keys.includes(g.key));
+  const total = groups.reduce((n,g)=>n+g.items.length,0);
+  if(!groups.length) return;
+  const names = groups.map(g=>g.name+' ('+g.items.length+')').join(', ');
+  const r = await modal({ title:`Eliminar ${groups.length} serie${groups.length>1?'s':''} · ${total} número${total>1?'s':''}`,
+    text: names.length>260 ? names.slice(0,260)+'…' : names,
+    fields:[], actions:[{id:'cancel',label:'Cancelar'},{id:'del',label:'Eliminar',cls:'danger',confirm:'¿Seguro? Pulsa otra vez'}]});
+  if(!r || r.action!=='del') return;
+  status('Eliminando…');
+  for(const g of groups) for(const m of g.items){
+    await DB.del(m.id);
+    if(covers.has(m.id)){ URL.revokeObjectURL(covers.get(m.id)); covers.delete(m.id); }
+  }
+  const ids = new Set(groups.flatMap(g=>g.items.map(m=>m.id)));
+  lib = lib.filter(m=>!ids.has(m.id));
+  view = {name:'home', era:'all', sel:null};
+  status(`${total} número${total>1?'s':''} eliminado${total>1?'s':''} de la biblioteca`); setTimeout(()=>status(''),3000);
+  render();
+}
+
 async function mergeSelected(){
   const groups = groupSeries(lib).filter(g=>view.sel.has(g.key));
   const total = groups.reduce((n,g)=>n+g.items.length,0);

@@ -84,6 +84,7 @@
   .shead p{color:var(--mute);margin:8px 0 16px}
   .back{color:var(--mute);margin-bottom:18px;display:inline-flex;gap:6px}
   .back:hover{color:var(--text)}
+  .btn.mini{padding:4px 11px;font:500 11px var(--body);letter-spacing:0;text-transform:none;order:2}
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
   .chips{display:flex;gap:8px;overflow-x:auto;padding:2px 0 22px;scrollbar-width:none}
   .chip{flex:none;display:inline-flex;align-items:center;gap:8px;padding:7px 14px;border-radius:999px;border:1px solid var(--line);background:#0a0d17b0;font:500 11px var(--tech);letter-spacing:.1em;text-transform:uppercase;color:var(--mute);cursor:pointer;transition:.15s}
@@ -594,12 +595,13 @@ async function makeCover(file, entries){
 }
 
 /* Si se importa a una serie concreta: la serie manda, y lo que el nombre llamaba "serie" pasa a ser el título */
-function targetFor(p, target){
+function targetFor(p, target, forcedTitle){
   const g = groupSeries(lib).find(x=>x.key===skey(target));
   const series = g ? g.name : target;
   let title = p.title || '';
   if(p.lead) title = p.series;
   else if(p.series && p.series!=='Sin serie' && skey(p.series)!==skey(series)) title = p.series;
+  if(forcedTitle) title = forcedTitle;
   return { series, issue:p.issue, title, era: g ? eraOf(g.items[0]) : eraGuess(series) };
 }
 
@@ -613,7 +615,7 @@ async function importFiles(fileList, opts={}){
     status(`Importando ${i+1} de ${files.length}: ${f.name}`);
     if(known.has(f.name+':'+f.size)){
       const ex = lib.find(m=>m.name===f.name && m.size===f.size);
-      if(opts.series && ex){ const t = targetFor(parseName(f.name,''), opts.series); Object.assign(ex,{series:t.series,issue:t.issue,title:t.title,era:t.era,manual:true}); try{ await DB.put(ex); moved++; }catch(e){ fails.push(f.name+' — '+(e.message||e)); } }
+      if(opts.series && ex){ const t = targetFor(parseName(f.name,''), opts.series, opts.title); Object.assign(ex,{series:t.series,issue:t.issue,title:t.title,era:t.era,manual:true}); try{ await DB.put(ex); moved++; }catch(e){ fails.push(f.name+' — '+(e.message||e)); } }
       else dup++;
       continue;
     }
@@ -628,7 +630,7 @@ async function importFiles(fileList, opts={}){
       const id = 'c'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
       const cover = await makeCover(f, entries);
       let era = eraGuess(series), manual = false;
-      if(opts.series){ const t = targetFor(p, opts.series); series=t.series; issue=t.issue; title=t.title; era=t.era; manual=true; }
+      if(opts.series){ const t = targetFor(p, opts.series, opts.title); series=t.series; issue=t.issue; title=t.title; era=t.era; manual=true; }
       const meta = { id, name:f.name, folder, size:f.size, series, issue, title, era, manual, pages:entries.length, pos:0, read:false, added:Date.now(), opened:0, cover };
       await DB.putFile(id, f);
       await DB.put(meta);
@@ -783,6 +785,7 @@ function render(){
   const gr = $('goRead'); if(gr) gr.onclick = () => { const s = groupSeries(lib).find(x=>x.key===skey(view.series)); openComic(nextToRead(s.items).id); };
   const sd = $('sortDir'); if(sd) sd.onclick = () => { view.desc = !view.desc; render(); };
   const rs = $('renSeries'); if(rs) rs.onclick = renameSeries;
+  main.querySelectorAll('[data-gadd]').forEach(inp=>inp.onchange = e => { importFiles(e.target.files,{series:view.series,title:inp.dataset.gadd}); e.target.value=''; });
   const fts = $('fToSeries'); if(fts) fts.onchange = e => { importFiles(e.target.files,{series:view.series}); e.target.value=''; };
   const ds = $('delSeries'); if(ds) ds.onclick = () => deleteSeries([skey(view.series)]);
 }
@@ -799,7 +802,7 @@ function groupedIssues(items){
   shared.sort((a,b)=>collator.compare(a[1].name,b[1].name));
   const used = new Set(shared.map(x=>x[0]));
   const rest = items.filter(m=>!(m.title && used.has(skey(titleBase(m.title).base))));
-  let out = shared.map(([k,v])=>`<section><h2><span class="dot"></span>${esc(v.name)} <small>${v.items.length} número${v.items.length>1?'s':''}</small></h2><div class="grid">${v.items.map(m=>tile(m,false,true,true)).join('')}</div></section>`).join('');
+  let out = shared.map(([k,v])=>`<section><h2><span class="dot"></span>${esc(v.name)} <small>${v.items.length} número${v.items.length>1?'s':''}</small><label class="btn mini">＋ Añadir aquí<input type="file" multiple accept=".cbz,.cbr,.zip,.rar" data-gadd="${esc(v.name)}"></label></h2><div class="grid">${v.items.map(m=>tile(m,false,true,true)).join('')}</div></section>`).join('');
   if(rest.length) out += `<section><h2><span class="dot"></span>Otros números <small>${rest.length}</small></h2><div class="grid">${rest.map(m=>tile(m)).join('')}</div></section>`;
   return out;
 }

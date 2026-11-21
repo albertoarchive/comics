@@ -519,18 +519,20 @@ async function extractRar(file,en){
    NOMBRES → SERIE + NÚMERO
    ===================================================== */
 function parseName(fileName, folder){
-  let s = fileName.replace(/\.[^.]+$/,'').replace(/[_]+/g,' ');
+  let s = fileName.replace(/\.[^.]+$/,'').replace(/_+/g,' ');
   s = s.replace(/\([^)]*\)|\[[^\]]*\]/g,' ').replace(/\s+/g,' ').trim();
-  let issue = null, series = s;
-  const m = s.match(/^(.*?)[\s\-–—,.:]*(?:#|n[ºo°]\.?\s*|n\.\s*|vol(?:umen|ume)?\.?\s*|tomo\s*|issue\s*|v\.?\s*|t\.?\s*)?0*(\d{1,4})\s*$/i);
-  if(m && m[1].trim()){ series = m[1].trim(); issue = parseInt(m[2],10); }
-  series = series.replace(/[\s\-–—,.:#]+$/,'').trim();
-  if(folder && (!issue || !series)) { if(!series) series = folder; }
-  if(folder && issue!==null && collator.compare(series,folder)!==0 && series.toLowerCase().includes(folder.toLowerCase())===false) {
-    // la carpeta manda cuando el archivo no repite el nombre de la serie
-    series = folder;
+  let issue = null, series = s, m;
+  if((m = s.match(/^#?0*(\d{1,3})$/))){ issue = parseInt(m[1],10); series = ''; }
+  else if((m = s.match(/^#?0*(\d{1,3})\s*[-–—._:)]+\s*(.+)$/)) || (m = s.match(/^#?0*(\d{1,3})\s+(\D.*)$/))){
+    // número delante: "1 - El Lado Oscuro", "03. Título"
+    issue = parseInt(m[1],10); series = m[2];
+  } else if((m = s.match(/^(.*?)[\s\-–—,.:]*(?:#|n[ºo°]\.?\s*|n\.\s*|vol(?:umen|ume)?\.?\s*|tomo\s*|issue\s*|cap[ií]tulo\s*|cap\.?\s*|parte\s*|part\s*|v\.?\s*|t\.?\s*)?(?<!\d)0*(\d{1,3})(?:\s*(?:de|of|\/)\s*\d+)?(?:\s*[-–—:]\s*(.+))?\s*$/i)) && m[1].trim()){
+    // número detrás: "Darth Vader 012", "Doctora Aphra v3", "Título 04 - Subtítulo"
+    series = m[1].trim(); issue = parseInt(m[2],10);
   }
-  return { series: series || folder || 'Sin serie', issue };
+  series = series.replace(/^[\s\-–—,.:#]+|[\s\-–—,.:#]+$/g,'').trim();
+  if(!series) series = folder || 'Sin serie';
+  return { series, issue };
 }
 
 /* =====================================================
@@ -550,6 +552,7 @@ const ERAS = [
 const ERA = Object.fromEntries(ERAS.map(e=>[e.id,e]));
 const ERA_KEYS = [
   ['altarep', /alta rep[uú]blica|high republic/i],
+  ['republica', /qui-?gon|padm[eé]|anakin|dooku|phantom menace|amenaza fantasma|episode (i|ii|iii)\b|episodio (i|ii|iii)\b/i],
   ['clon', /clone wars|guerras? (de los )?clon|asajj|ventress|grievous|cad bane/i],
   ['legends', /legends|old republic|antigua rep[uú]blica|dark empire|crimson empire|dark times|legacy|tales of the jedi|cuentos de los jedi/i],
   ['primera', /first order|primera orden|poe dameron|resistance|resistencia|kylo|sequel|secuela|force awakens|rise of skywalker/i],
@@ -598,7 +601,7 @@ async function importFiles(fileList){
       const {series,issue} = parseName(f.name, folder);
       const id = 'c'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
       const cover = await makeCover(f, entries);
-      const meta = { id, name:f.name, size:f.size, series, issue, era:eraGuess(series), pages:entries.length, pos:0, read:false, added:Date.now(), opened:0, cover };
+      const meta = { id, name:f.name, folder, size:f.size, series, issue, era:eraGuess(series), pages:entries.length, pos:0, read:false, added:Date.now(), opened:0, cover };
       await DB.putFile(id, f);
       await DB.put(meta);
       lib.push(meta); known.add(f.name+':'+f.size); ok++;
@@ -767,7 +770,7 @@ async function editComic(id){
   } else if(r.action==='save'){
     m.series = r.vals.series.trim() || m.series;
     m.issue = r.vals.issue==='' ? null : parseInt(r.vals.issue,10);
-    m.era = r.vals.era;
+    m.era = r.vals.era; m.manual = true;
     await DB.put(m);
     if(view.name==='series') view.series = m.series;
   }
@@ -781,7 +784,7 @@ async function renameSeries(){
     actions:[{id:'cancel',label:'Cancelar'},{id:'save',label:'Guardar',cls:'pri'}]});
   if(!r || r.action!=='save') return;
   const nn = r.vals.n.trim() || old;
-  for(const m of lib.filter(x=>x.series.toLowerCase()===old.toLowerCase())){ m.series = nn; m.era = r.vals.era; await DB.put(m); }
+  for(const m of lib.filter(x=>x.series.toLowerCase()===old.toLowerCase())){ m.series = nn; m.era = r.vals.era; m.manual = true; await DB.put(m); }
   view.series = nn; render();
 }
 
@@ -986,6 +989,13 @@ const stars = (() => {
 (async () => {
   await DB.init();
   try{ lib = await DB.all(); }catch(e){ lib = []; }
+  // v2 del analizador de nombres: reagrupa lo que no se haya editado a mano
+  if(store.get('v:parser')!=='2'){
+    for(const m of lib){ if(m.manual) continue;
+      const p = parseName(m.name, m.folder||''); m.series = p.series; m.issue = p.issue; m.era = eraGuess(p.series);
+      try{ await DB.put(m); }catch(e){} }
+    store.set('v:parser','2');
+  }
   render();
 })();
 })();

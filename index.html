@@ -766,15 +766,20 @@ function render(){
   const rs = $('renSeries'); if(rs) rs.onclick = renameSeries;
   const ds = $('delSeries'); if(ds) ds.onclick = () => deleteSeries([skey(view.series)]);
 }
+/* "Al Servicio de la República 2" -> base "Al Servicio de la República", parte 2 */
+function titleBase(t){
+  const m = String(t||'').trim().match(/^(.*?)[\s\-–—:,]*(?:parte|part|vol\.?|volumen|tomo)?\s*(\d{1,2})\s*$/i);
+  return (m && m[1].trim()) ? {base:m[1].trim(), part:parseInt(m[2],10)} : {base:String(t||'').trim(), part:null};
+}
 function groupedIssues(items){
   const g = new Map();
-  items.forEach(m=>{ const k = m.title ? skey(m.title) : ''; if(!g.has(k)) g.set(k,{name:m.title||'',items:[]}); g.get(k).items.push(m); });
+  items.forEach(m=>{ const b = titleBase(m.title).base; const k = b ? skey(b) : ''; if(!g.has(k)) g.set(k,{name:b,items:[]}); g.get(k).items.push(m); });
   const shared = [...g.entries()].filter(([k,v])=>k && v.items.length>=2);
   if(!shared.length) return `<div class="grid">${items.map(m=>tile(m)).join('')}</div>`;
   shared.sort((a,b)=>collator.compare(a[1].name,b[1].name));
   const used = new Set(shared.map(x=>x[0]));
-  const rest = items.filter(m=>!(m.title && used.has(skey(m.title))));
-  let out = shared.map(([k,v])=>`<section><h2><span class="dot"></span>${esc(v.name)} <small>${v.items.length} número${v.items.length>1?'s':''}</small></h2><div class="grid">${v.items.map(m=>tile(m,false,true)).join('')}</div></section>`).join('');
+  const rest = items.filter(m=>!(m.title && used.has(skey(titleBase(m.title).base))));
+  let out = shared.map(([k,v])=>`<section><h2><span class="dot"></span>${esc(v.name)} <small>${v.items.length} número${v.items.length>1?'s':''}</small></h2><div class="grid">${v.items.map(m=>tile(m,false,true,true)).join('')}</div></section>`).join('');
   if(rest.length) out += `<section><h2><span class="dot"></span>Otros números <small>${rest.length}</small></h2><div class="grid">${rest.map(m=>tile(m)).join('')}</div></section>`;
   return out;
 }
@@ -788,11 +793,11 @@ function seriesTile(s){
     <div class="meta"><div class="nm">${esc(s.name)}</div><div class="sub">${s.items.length} número${s.items.length>1?'s':''}${read?` · ${read} leído${read>1?'s':''}`:''}</div>
     <div class="bar"><b style="width:${p}%"></b></div></div></div>`;
 }
-function tile(m, showSeries, hideTitle){
+function tile(m, showSeries, hideTitle, showPart){
   const p = pct(m);
   return `<div class="tile" style="--ec:${eraCol(eraOf(m))}" data-open="${m.id}"><div class="cover ${m.cover?'':'ph'}" ${coverStyle(m)}>${m.cover?'':phLetter(m)}
     ${m.read?'<span class="badge read">Leído</span>':(m.pos>0?`<span class="badge">${p}%</span>`:'')}<button class="dots" data-edit="${m.id}" title="Editar">⋯</button></div>
-    <div class="meta"><div class="nm">${showSeries?esc(m.series)+' ':''}${esc(hideTitle?issueLabel(m):fullLabel(m))}</div><div class="sub">${m.pages} págs.</div>
+    <div class="meta"><div class="nm">${showSeries?esc(m.series)+' ':''}${esc(hideTitle?issueLabel(m)+(showPart&&titleBase(m.title).part!=null?' · Parte '+titleBase(m.title).part:''):fullLabel(m))}</div><div class="sub">${m.pages} págs.</div>
     ${p&&!m.read?`<div class="bar"><b style="width:${p}%"></b></div>`:''}</div></div>`;
 }
 

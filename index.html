@@ -530,18 +530,18 @@ async function extractRar(file,en){
 function parseName(fileName, folder){
   let s = fileName.replace(/\.[^.]+$/,'').replace(/_+/g,' ');
   s = s.replace(/\([^)]*\)|\[[^\]]*\]/g,' ').replace(/\s+/g,' ').trim();
-  let issue = null, series = s, m, lead = false;
+  let issue = null, series = s, m, lead = false, title = '';
   if((m = s.match(/^#?0*(\d{1,3})$/))){ issue = parseInt(m[1],10); series = ''; }
   else if((m = s.match(/^#?0*(\d{1,3})\s*[-–—._:)]+\s*(.+)$/)) || (m = s.match(/^#?0*(\d{1,3})\s+(\D.*)$/))){
     // número delante: "1 - El Lado Oscuro", "03. Título"
     issue = parseInt(m[1],10); series = m[2]; lead = true;
   } else if((m = s.match(/^(.*?)[\s\-–—,.:]*(?:#|n[ºo°]\.?\s*|n\.\s*|vol(?:umen|ume)?\.?\s*|tomo\s*|issue\s*|cap[ií]tulo\s*|cap\.?\s*|parte\s*|part\s*|v\.?\s*|t\.?\s*)?(?<!\d)0*(\d{1,3})(?:\s*(?:de|of|\/)\s*\d+)?(?:\s*[-–—:]\s*(.+))?\s*$/i)) && m[1].trim()){
     // número detrás: "Darth Vader 012", "Doctora Aphra v3", "Título 04 - Subtítulo"
-    series = m[1].trim(); issue = parseInt(m[2],10);
+    series = m[1].trim(); issue = parseInt(m[2],10); title = (m[3]||'').trim();
   }
   series = series.replace(/^[\s\-–—,.:#]+|[\s\-–—,.:#]+$/g,'').trim();
   if(!series) series = folder || 'Sin serie';
-  return { series, issue, lead };
+  return { series, issue, lead, title };
 }
 
 /* =====================================================
@@ -608,7 +608,7 @@ async function importFiles(fileList){
       const parts = (f.webkitRelativePath||'').split('/');
       const folder = parts.length>1 ? parts[parts.length-2] : '';
       const p = parseName(f.name, folder);
-      let {series,issue} = p, title = '';
+      let {series,issue} = p, title = p.title || '';
       if(p.lead && folder){ title = series; series = folder; }
       const id = 'c'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
       const cover = await makeCover(f, entries);
@@ -725,7 +725,7 @@ function render(){
       <button class="btn" id="renSeries">Editar serie</button>
       <button class="btn danger" id="delSeries">Eliminar serie</button>
       <button class="btn ${view.desc?'on':''}" id="sortDir">${view.desc?'Más nuevo primero':'Más antiguo primero'}</button></div></div></div>
-      <div class="grid">${items.map(m=>tile(m)).join('')}</div>`;
+      ${groupedIssues(items)}`;
   } else {
     const cont = filter ? [] : lib.filter(m=>m.pos>0&&!m.read).sort((a,b)=>b.opened-a.opened).slice(0,12);
     const series = groupSeries(list);
@@ -766,6 +766,18 @@ function render(){
   const rs = $('renSeries'); if(rs) rs.onclick = renameSeries;
   const ds = $('delSeries'); if(ds) ds.onclick = () => deleteSeries([skey(view.series)]);
 }
+function groupedIssues(items){
+  const g = new Map();
+  items.forEach(m=>{ const k = m.title ? skey(m.title) : ''; if(!g.has(k)) g.set(k,{name:m.title||'',items:[]}); g.get(k).items.push(m); });
+  const shared = [...g.entries()].filter(([k,v])=>k && v.items.length>=2);
+  if(!shared.length) return `<div class="grid">${items.map(m=>tile(m)).join('')}</div>`;
+  shared.sort((a,b)=>collator.compare(a[1].name,b[1].name));
+  const used = new Set(shared.map(x=>x[0]));
+  const rest = items.filter(m=>!(m.title && used.has(skey(m.title))));
+  let out = shared.map(([k,v])=>`<section><h2><span class="dot"></span>${esc(v.name)} <small>${v.items.length} número${v.items.length>1?'s':''}</small></h2><div class="grid">${v.items.map(m=>tile(m,false,true)).join('')}</div></section>`).join('');
+  if(rest.length) out += `<section><h2><span class="dot"></span>Otros números <small>${rest.length}</small></h2><div class="grid">${rest.map(m=>tile(m)).join('')}</div></section>`;
+  return out;
+}
 function nextToRead(items){
   return items.find(m=>m.pos>0&&!m.read) || items.find(m=>!m.read) || items[0];
 }
@@ -776,11 +788,11 @@ function seriesTile(s){
     <div class="meta"><div class="nm">${esc(s.name)}</div><div class="sub">${s.items.length} número${s.items.length>1?'s':''}${read?` · ${read} leído${read>1?'s':''}`:''}</div>
     <div class="bar"><b style="width:${p}%"></b></div></div></div>`;
 }
-function tile(m, showSeries){
+function tile(m, showSeries, hideTitle){
   const p = pct(m);
   return `<div class="tile" style="--ec:${eraCol(eraOf(m))}" data-open="${m.id}"><div class="cover ${m.cover?'':'ph'}" ${coverStyle(m)}>${m.cover?'':phLetter(m)}
     ${m.read?'<span class="badge read">Leído</span>':(m.pos>0?`<span class="badge">${p}%</span>`:'')}<button class="dots" data-edit="${m.id}" title="Editar">⋯</button></div>
-    <div class="meta"><div class="nm">${showSeries?esc(m.series)+' ':''}${esc(fullLabel(m))}</div><div class="sub">${m.pages} págs.</div>
+    <div class="meta"><div class="nm">${showSeries?esc(m.series)+' ':''}${esc(hideTitle?issueLabel(m):fullLabel(m))}</div><div class="sub">${m.pages} págs.</div>
     ${p&&!m.read?`<div class="bar"><b style="width:${p}%"></b></div>`:''}</div></div>`;
 }
 
@@ -789,6 +801,7 @@ async function editComic(id){
   const r = await modal({ title:'Editar cómic', fields:[
       {id:'series',label:'Serie',value:m.series,list:true},
       {id:'issue',label:'Número',value:m.issue??'',type:'number'},
+      {id:'title',label:'Título (agrupa los números dentro de la serie)',value:m.title||''},
       {id:'era',label:'Era',type:'select',value:eraOf(m),options:ERAS.map(e=>[e.id,e.name])}],
     actions:[
       {id:'del',label:'Eliminar',cls:'danger',confirm:'¿Seguro? Pulsa otra vez'},
@@ -804,7 +817,7 @@ async function editComic(id){
   } else if(r.action==='save'){
     m.series = r.vals.series.trim() || m.series;
     m.issue = r.vals.issue==='' ? null : parseInt(r.vals.issue,10);
-    m.era = r.vals.era; m.manual = true;
+    m.era = r.vals.era; m.title = r.vals.title.trim(); m.manual = true;
     await DB.put(m);
     if(view.name==='series') view.series = m.series;
   }
@@ -1062,11 +1075,11 @@ const stars = (() => {
   await DB.init();
   try{ lib = await DB.all(); }catch(e){ lib = []; }
   // v2 del analizador de nombres: reagrupa lo que no se haya editado a mano
-  if(store.get('v:parser')!=='3'){
+  if(store.get('v:parser')!=='4'){
     for(const m of lib){ if(m.manual) continue;
-      const p = parseName(m.name, m.folder||''); m.title = ''; if(p.lead && m.folder){ m.title = p.series; p.series = m.folder; } m.series = p.series; m.issue = p.issue; m.era = eraGuess(p.series);
+      const p = parseName(m.name, m.folder||''); m.title = p.title || ''; if(p.lead && m.folder){ m.title = p.series; p.series = m.folder; } m.series = p.series; m.issue = p.issue; m.era = eraGuess(p.series);
       try{ await DB.put(m); }catch(e){} }
-    store.set('v:parser','3');
+    store.set('v:parser','4');
   }
   render();
 })();

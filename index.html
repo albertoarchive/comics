@@ -709,7 +709,7 @@ function byIssue(a,b){
   const t = collator.compare(a.title||'', b.title||''); if(t) return t;
   return collator.compare(a.name,b.name);
 }
-const isGroup = () => store.get('v:group')==='1';
+const isGroup = () => store.get('v:group')!=='0';
 const pct = m => m.read ? 100 : (m.pos>0 ? Math.round((m.pos+1)/m.pages*100) : 0);
 const issueLabel = m => m.issue!=null ? '#'+m.issue : m.name.replace(/\.[^.]+$/,'');
 const fullLabel = m => issueLabel(m) + (m.title && m.issue!=null ? ' · '+m.title : '');
@@ -803,7 +803,11 @@ function groupedIssues(items){
   items.forEach(m=>{ const b = titleBase(m.title).base; const k = b ? skey(b) : ''; if(!g.has(k)) g.set(k,{name:b,items:[]}); g.get(k).items.push(m); });
   const shared = [...g.entries()].filter(([k,v])=>k && v.items.length>=2);
   if(!shared.length) return `<div class="grid">${items.map(m=>tile(m)).join('')}</div>`;
-  shared.sort((a,b)=>collator.compare(a[1].name,b[1].name));
+  // las subseries se ordenan por su número más bajo (no por nombre ni por orden de importación)
+  const minIssue = v => v.items.reduce((m,x)=>x.issue!=null && x.issue<m ? x.issue : m, Infinity);
+  shared.sort((a,b)=>{ const d = minIssue(a[1])-minIssue(b[1]); if(d && isFinite(d)) return d; if(isFinite(minIssue(a[1]))!==isFinite(minIssue(b[1]))) return isFinite(minIssue(a[1]))?-1:1; return collator.compare(a[1].name,b[1].name); });
+  if(view.desc) shared.reverse();
+  shared.forEach(([k,v])=>v.items.sort(byIssue)); if(view.desc) shared.forEach(([k,v])=>v.items.reverse());
   const used = new Set(shared.map(x=>x[0]));
   const rest = items.filter(m=>!(m.title && used.has(skey(titleBase(m.title).base))));
   let out = shared.map(([k,v])=>`<section><h2><span class="dot"></span>${esc(v.name)} <small>${v.items.length} número${v.items.length>1?'s':''}</small><label class="btn mini">＋ Añadir aquí<input type="file" multiple accept=".cbz,.cbr,.zip,.rar" data-gadd="${esc(v.name)}"></label></h2><div class="grid">${v.items.map(m=>tile(m,false,true,true)).join('')}</div></section>`).join('');

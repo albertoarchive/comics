@@ -593,15 +593,30 @@ async function makeCover(file, entries){
   }catch(e){ return null; }
 }
 
-async function importFiles(fileList){
+/* Si se importa a una serie concreta: la serie manda, y lo que el nombre llamaba "serie" pasa a ser el título */
+function targetFor(p, target){
+  const g = groupSeries(lib).find(x=>x.key===skey(target));
+  const series = g ? g.name : target;
+  let title = p.title || '';
+  if(p.lead) title = p.series;
+  else if(p.series && p.series!=='Sin serie' && skey(p.series)!==skey(series)) title = p.series;
+  return { series, issue:p.issue, title, era: g ? eraOf(g.items[0]) : eraGuess(series) };
+}
+
+async function importFiles(fileList, opts={}){
   const files = [...fileList].filter(f => /\.(cbz|cbr|zip|rar)$/i.test(f.name));
   if(!files.length){ status('No he visto ningún .cbz ni .cbr en lo que has soltado.'); setTimeout(()=>status(''),3500); return; }
   const known = new Set(lib.map(m=>m.name+':'+m.size));
-  let ok = 0, dup = 0; const fails = [];
+  let ok = 0, dup = 0, moved = 0; const fails = [];
   for(let i=0;i<files.length;i++){
     const f = files[i];
     status(`Importando ${i+1} de ${files.length}: ${f.name}`);
-    if(known.has(f.name+':'+f.size)){ dup++; continue; }
+    if(known.has(f.name+':'+f.size)){
+      const ex = lib.find(m=>m.name===f.name && m.size===f.size);
+      if(opts.series && ex){ const t = targetFor(parseName(f.name,''), opts.series); Object.assign(ex,{series:t.series,issue:t.issue,title:t.title,era:t.era,manual:true}); try{ await DB.put(ex); moved++; }catch(e){ fails.push(f.name+' — '+(e.message||e)); } }
+      else dup++;
+      continue;
+    }
     try{
       const entries = await listPages(f);
       if(!entries.length) throw new Error('no tiene imágenes');
@@ -612,7 +627,9 @@ async function importFiles(fileList){
       if(p.lead && folder){ title = series; series = folder; }
       const id = 'c'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
       const cover = await makeCover(f, entries);
-      const meta = { id, name:f.name, folder, size:f.size, series, issue, title, era:eraGuess(series), pages:entries.length, pos:0, read:false, added:Date.now(), opened:0, cover };
+      let era = eraGuess(series), manual = false;
+      if(opts.series){ const t = targetFor(p, opts.series); series=t.series; issue=t.issue; title=t.title; era=t.era; manual=true; }
+      const meta = { id, name:f.name, folder, size:f.size, series, issue, title, era, manual, pages:entries.length, pos:0, read:false, added:Date.now(), opened:0, cover };
       await DB.putFile(id, f);
       await DB.put(meta);
       lib.push(meta); known.add(f.name+':'+f.size); ok++;
@@ -622,6 +639,7 @@ async function importFiles(fileList){
   render();
   const bits = [];
   if(ok) bits.push(ok+' importado'+(ok>1?'s':''));
+  if(moved) bits.push(moved+' movido'+(moved>1?'s':'')+' a la serie');
   if(dup) bits.push(dup+' ya estaba'+(dup>1?'n':''));
   if(fails.length) bits.push(fails.length+' con error');
   status(bits.join(' · ') + (fails.length ? ' — '+fails[0] : ''));
@@ -721,7 +739,8 @@ function render(){
     html += `<button class="back" id="back">← Todas las series</button>
       <div class="shead"><div class="cover ${s.items[0].cover?'':'ph'}" ${coverStyle(s.items[0])}>${s.items[0].cover?'':phLetter(s.items[0])}</div>
       <div style="--ec:${eraCol(eraOf(s.items[0]))}"><h1>${esc(s.name)}</h1><div class="era">${esc(ERA[eraOf(s.items[0])].name)}</div><p>${s.items.length} número${s.items.length>1?'s':''} · ${done} leído${done!==1?'s':''}</p>
-      <div class="row"><button class="btn pri" id="goRead">▶ ${cont.pos>0&&!cont.read?'Continuar':'Empezar'} ${esc(issueLabel(cont))}</button>
+      <div class="row"><label class="btn" id="addToSeries">＋ Añadir cómics a esta serie<input id="fToSeries" type="file" multiple accept=".cbz,.cbr,.zip,.rar"></label>
+      <button class="btn pri" id="goRead">▶ ${cont.pos>0&&!cont.read?'Continuar':'Empezar'} ${esc(issueLabel(cont))}</button>
       <button class="btn" id="renSeries">Editar serie</button>
       <button class="btn danger" id="delSeries">Eliminar serie</button>
       <button class="btn ${view.desc?'on':''}" id="sortDir">${view.desc?'Más nuevo primero':'Más antiguo primero'}</button></div></div></div>
@@ -764,6 +783,7 @@ function render(){
   const gr = $('goRead'); if(gr) gr.onclick = () => { const s = groupSeries(lib).find(x=>x.key===skey(view.series)); openComic(nextToRead(s.items).id); };
   const sd = $('sortDir'); if(sd) sd.onclick = () => { view.desc = !view.desc; render(); };
   const rs = $('renSeries'); if(rs) rs.onclick = renameSeries;
+  const fts = $('fToSeries'); if(fts) fts.onchange = e => { importFiles(e.target.files,{series:view.series}); e.target.value=''; };
   const ds = $('delSeries'); if(ds) ds.onclick = () => deleteSeries([skey(view.series)]);
 }
 /* "Al Servicio de la República 2" -> base "Al Servicio de la República", parte 2 */
@@ -1022,13 +1042,13 @@ $('fDir').onchange = e => { importFiles(e.target.files); e.target.value=''; };
 $('logo').onclick = () => { view={name:'home', era:'all'}; q.text=''; $('q').value=''; render(); window.scrollTo(0,0); };
 $('q').oninput = e => { q.text = e.target.value; if(view.name==='series') view={name:'home', era:view.era}; render(); };
 let dragN = 0;
-window.addEventListener('dragenter',e=>{ e.preventDefault(); dragN++; document.body.classList.add('over'); });
+window.addEventListener('dragenter',e=>{ e.preventDefault(); dragN++; $('dropHint').textContent = (view.name==='series' && $('reader').style.display!=='block') ? 'Añadir a «'+view.series+'»' : 'Suelta tus cómics aquí'; document.body.classList.add('over'); });
 window.addEventListener('dragover',e=>e.preventDefault());
 window.addEventListener('dragleave',e=>{ e.preventDefault(); if(--dragN<=0){ dragN=0; document.body.classList.remove('over'); } });
 window.addEventListener('drop',async e=>{
   e.preventDefault(); dragN=0; document.body.classList.remove('over');
   const files = [...(e.dataTransfer?.files||[])];
-  if(files.length) importFiles(files);
+  if(files.length) importFiles(files, (view.name==='series' && $('reader').style.display!=='block') ? {series:view.series} : {});
 });
 
 /* =====================================================

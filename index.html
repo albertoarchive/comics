@@ -706,8 +706,10 @@ function groupSeries(list){
 function byIssue(a,b){
   if(a.issue!=null && b.issue!=null && a.issue!==b.issue) return a.issue-b.issue;
   if((a.issue==null)!==(b.issue==null)) return a.issue==null?1:-1;
+  const t = collator.compare(a.title||'', b.title||''); if(t) return t;
   return collator.compare(a.name,b.name);
 }
+const isGroup = () => store.get('v:group')==='1';
 const pct = m => m.read ? 100 : (m.pos>0 ? Math.round((m.pos+1)/m.pages*100) : 0);
 const issueLabel = m => m.issue!=null ? '#'+m.issue : m.name.replace(/\.[^.]+$/,'');
 const fullLabel = m => issueLabel(m) + (m.title && m.issue!=null ? ' · '+m.title : '');
@@ -745,8 +747,9 @@ function render(){
       <button class="btn pri" id="goRead">▶ ${cont.pos>0&&!cont.read?'Continuar':'Empezar'} ${esc(issueLabel(cont))}</button>
       <button class="btn" id="renSeries">Editar serie</button>
       <button class="btn danger" id="delSeries">Eliminar serie</button>
+      <button class="btn ${isGroup()?'on':''}" id="grpToggle" title="Separar los números por título dentro de la serie">▤ Agrupar por título</button>
       <button class="btn ${view.desc?'on':''}" id="sortDir">${view.desc?'Más nuevo primero':'Más antiguo primero'}</button></div></div></div>
-      ${groupedIssues(items)}`;
+      ${isGroup() ? groupedIssues(items) : `<div class="grid">${items.map(m=>tile(m)).join('')}</div>`}`;
   } else {
     const cont = filter ? [] : lib.filter(m=>m.pos>0&&!m.read).sort((a,b)=>b.opened-a.opened).slice(0,12);
     const series = groupSeries(list);
@@ -783,6 +786,7 @@ function render(){
   } else bar.style.display='none';
   const back = $('back'); if(back) back.onclick = () => { view={name:'home', era:view.era}; render(); };
   const gr = $('goRead'); if(gr) gr.onclick = () => { const s = groupSeries(lib).find(x=>x.key===skey(view.series)); openComic(nextToRead(s.items).id); };
+  const gt = $('grpToggle'); if(gt) gt.onclick = () => { store.set('v:group', isGroup()?'0':'1'); render(); };
   const sd = $('sortDir'); if(sd) sd.onclick = () => { view.desc = !view.desc; render(); };
   const rs = $('renSeries'); if(rs) rs.onclick = renameSeries;
   main.querySelectorAll('[data-gadd]').forEach(inp=>inp.onchange = e => { importFiles(e.target.files,{series:view.series,title:inp.dataset.gadd}); e.target.value=''; });

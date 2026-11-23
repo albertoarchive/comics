@@ -128,6 +128,9 @@
   .stack.sel .cover{box-shadow:0 0 0 2px var(--acc),0 0 24px #4db8ff66,6px -6px 0 -1px #141a2d,12px -11px 0 -2px #0d1222}
   /* serie */
   .shead{display:flex;gap:28px;align-items:flex-end;margin-bottom:34px;flex-wrap:wrap}
+  .gap .cover{background:repeating-linear-gradient(135deg,#0d1222 0 10px,#111830 10px 20px);border:1.5px dashed color-mix(in srgb,var(--ec,var(--acc)) 55%,transparent);box-shadow:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:var(--mute)}
+  .gap .cover b{font-size:34px;color:var(--ec,var(--acc))}.gap .cover span{font-size:11px;text-transform:uppercase;letter-spacing:.08em}
+  .gap a{color:var(--acc);font-size:12px}.gap:hover .cover{transform:none}
   .shead .cover{width:150px;flex:none}
   .shead h1{font:700 clamp(26px,4.4vw,46px)/1.05 var(--tech);letter-spacing:.04em;text-transform:uppercase}
   .shead p{color:var(--mute);margin:8px 0 16px}
@@ -1073,6 +1076,10 @@ function render(){
     let items = s.items.slice(); if(view.desc) items.reverse();
     const cont = nextToRead(s.items);
     const done = s.items.filter(m=>m.read).length;
+    const gaps = gapList(s.items), gset = new Set(gaps);
+    let seq = []; { const asc = s.items.slice(); let prev = null;
+      asc.forEach(m=>{ if(m.issue!=null){ if(prev!=null) for(let k=prev+1;k<m.issue;k++) if(gset.has(k)) seq.push({gap:k}); prev = Math.max(prev??m.issue, m.issue); } seq.push(m); });
+      if(view.desc) seq.reverse(); }
     html += `<button class="back" id="back">← Todas las series</button>
       <div class="shead"><div class="cover ${s.items[0].cover?'':'ph'}" ${coverStyle(s.items[0])}>${s.items[0].cover?'':phLetter(s.items[0])}</div>
       <div style="--ec:${eraCol(eraOf(s.items[0]))}"><h1>${esc(s.name)}</h1><div class="era">${esc(ERA[eraOf(s.items[0])].name)}</div><p>${s.items.length} número${s.items.length>1?'s':''} · ${done} leído${done!==1?'s':''}</p>
@@ -1082,7 +1089,8 @@ function render(){
       <button class="btn danger" id="delSeries">Eliminar serie</button>
       <button class="btn ${isGroup()?'on':''}" id="grpToggle" title="Separar los números por título dentro de la serie">▤ Agrupar por título</button>
       <button class="btn ${view.desc?'on':''}" id="sortDir">${view.desc?'Más nuevo primero':'Más antiguo primero'}</button></div></div></div>
-      ${isGroup() ? groupedIssues(items) : `<div class="grid">${items.map(m=>tile(m)).join('')}</div>`}`;
+      ${gaps.length?`<div class="miss" style="margin:0 0 18px">Te faltan ${gaps.length} número${gaps.length>1?'s':''} entre el #${Math.min(...s.items.map(m=>m.issue).filter(x=>x!=null))} y el #${Math.max(...s.items.map(m=>m.issue).filter(x=>x!=null))}: ${gaps.slice(0,30).map(x=>'#'+x).join(', ')}${gaps.length>30?'…':''}</div>`:''}
+      ${(()=>{ const plain = `<div class="grid">${seq.map(x=>x.gap?gapTile(s.name,x.gap,eraCol(eraOf(s.items[0]))):tile(x)).join('')}</div>`; return isGroup() ? groupedIssues(items, plain) : plain; })()}`;
   } else {
     const cont = filter ? [] : lib.filter(m=>m.pos>0&&!m.read).sort((a,b)=>b.opened-a.opened).slice(0,12);
     const series = groupSeries(list);
@@ -1131,11 +1139,11 @@ function titleBase(t){
   const m = String(t||'').trim().match(/^(.*?)[\s\-–—:,]*(?:parte|part|vol\.?|volumen|tomo)?\s*(\d{1,2})\s*$/i);
   return (m && m[1].trim()) ? {base:m[1].trim(), part:parseInt(m[2],10)} : {base:String(t||'').trim(), part:null};
 }
-function groupedIssues(items){
+function groupedIssues(items, fb){
   const g = new Map();
   items.forEach(m=>{ const b = titleBase(m.title).base; const k = b ? skey(b) : ''; if(!g.has(k)) g.set(k,{name:b,items:[]}); g.get(k).items.push(m); });
   const shared = [...g.entries()].filter(([k,v])=>k && v.items.length>=2);
-  if(!shared.length) return `<div class="grid">${items.map(m=>tile(m)).join('')}</div>`;
+  if(!shared.length) return fb || `<div class="grid">${items.map(m=>tile(m)).join('')}</div>`;
   // las subseries se ordenan por su número más bajo (no por nombre ni por orden de importación)
   const minIssue = v => v.items.reduce((m,x)=>x.issue!=null && x.issue<m ? x.issue : m, Infinity);
   shared.sort((a,b)=>{ const d = minIssue(a[1])-minIssue(b[1]); if(d && isFinite(d)) return d; if(isFinite(minIssue(a[1]))!==isFinite(minIssue(b[1]))) return isFinite(minIssue(a[1]))?-1:1; return collator.compare(a[1].name,b[1].name); });
@@ -1156,6 +1164,15 @@ function seriesTile(s){
   return `<div class="tile stack ${view.sel&&view.sel.has(s.key)?'sel':''}" style="--ec:${ec}" data-series="${esc(s.name)}" data-key="${esc(s.key)}"><span class="chk">✓</span><div class="cover ${first.cover?'':'ph'}" ${coverStyle(first)}>${first.cover?'':phLetter(first)}</div>
     <div class="meta"><div class="nm">${esc(s.name)}</div><div class="sub">${s.items.length} número${s.items.length>1?'s':''}${read?` · ${read} leído${read>1?'s':''}`:''}</div>
     <div class="bar"><b style="width:${p}%"></b></div></div></div>`;
+}
+function gapList(items){
+  const nums = [...new Set(items.map(m=>m.issue).filter(x=>x!=null))].sort((a,b)=>a-b), g = [];
+  if(nums.length>1 && nums[nums.length-1]-nums[0] < 400) for(let k=nums[0]; k<=nums[nums.length-1]; k++) if(!nums.includes(k)) g.push(k);
+  return g;
+}
+function gapTile(name, n, ec){
+  const u = 'https://www.google.com/search?tbm=isch&q='+encodeURIComponent('Star Wars '+name+' #'+n+' cover');
+  return `<div class="tile gap" style="--ec:${ec}"><div class="cover"><b>#${n}</b><span>Falta</span></div><div class="meta"><div class="nm">#${n}</div><div class="sub"><a href="${u}" target="_blank" rel="noopener">Ver portada ↗</a></div></div></div>`;
 }
 function tile(m, showSeries, hideTitle, showPart){
   const p = pct(m);

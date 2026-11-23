@@ -885,11 +885,16 @@ async function coverGrid(m){
 const gdist = (a,b) => { let s=0; for(let i=0;i<a.length;i++) s+=Math.abs(a[i]-b[i]); return s/a.length; };
 const volCache = new Map();
 function volOf(m){
+  if(m.vol) return m.vol;
   if(m.issue==null) return '';
   issInit();
   const sig = m.id+'|'+m.series+'|'+m.issue+'|'+(m.title||'')+'|'+(m.phase??'')+'|'+(cgrid.has(m.id)?1:0);
   if(volCache.has(sig)) return volCache.get(sig);
-  const text = [m.series, m.title, m.folder, String(m.name||'').replace(/\.[^.]+$/,'')].filter(Boolean).join(' ');
+  const fn = String(m.name||'').replace(/\.[^.]+$/,'');
+  const yrsAll = (fn.match(/\b(?:19|20)\d\d\b/g)||[]).join(' ');
+  // el nombre sin lo que va entre paréntesis/corchetes (resolución, grupo de escaneo…) ni la numeración
+  const fnClean = fn.replace(/\([^)]*\)|\[[^\]]*\]/g,' ');
+  const text = [m.series, m.title, m.folder, fnClean, yrsAll].filter(Boolean).join(' ');
   const tt = ntok(text); const cands = [];
   ISS.forEach(g=>{
     if(!g.nums.has(m.issue) || !g.toks.size) return;
@@ -1287,12 +1292,14 @@ function render(){
   const sr = $('serRead'); if(sr) sr.onclick = () => { const s = curSeries(); setReadAll(s.items,true); };
   const sp = $('serPh'); if(sp) sp.onclick = async () => { const s = curSeries();
     const r = await modal({title:'Asignar fase en «'+s.name+'»', text:'Pon la fase a un rango de números. Ej.: del 1 al 10 → Fase II. Dentro de cada fase, los números van de nuevo desde el 1.',
-      fields:[{id:'a',label:'Desde el número',type:'number',value:''},{id:'b',label:'Hasta el número (vacío = solo ese)',type:'number',value:''},{id:'p',label:'Fase',type:'select',value:'1',options:[['',' Automática (quitar)'],['0','Sin fase'],['1','Fase I'],['2','Fase II'],['3','Fase III']]}],
+      fields:[{id:'a',label:'Desde el número',type:'number',value:''},{id:'b',label:'Hasta el número (vacío = solo ese)',type:'number',value:''},{id:'p',label:'Fase',type:'select',value:'1',options:[['',' Automática (quitar)'],['0','Sin fase'],['1','Fase I'],['2','Fase II'],['3','Fase III']]},
+        {id:'v',label:'…o mover a este volumen / año',type:'select',value:'',options:[['','(no cambiar de volumen)'],...volOptions({issue:null}).slice(1)]}],
       actions:[{id:'cancel',label:'Cancelar'},{id:'all',label:'A toda la serie'},{id:'save',label:'Aplicar',cls:'pri'}]});
     if(!r||r.action==='cancel') return;
     const a=parseInt(r.vals.a,10), b2=r.vals.b===''?a:parseInt(r.vals.b,10);
     const its = r.action==='all' ? s.items : s.items.filter(m=>m.issue!=null && !isNaN(a) && m.issue>=a && m.issue<=b2);
-    for(const m of its){ if(r.vals.p==='') delete m.phase; else m.phase=parseInt(r.vals.p,10); m.manual = true; await DB.put(m); }
+    for(const m of its){ if(r.vals.v){ m.vol = r.vals.v; delete m.phase; } else if(r.vals.p==='') delete m.phase; else m.phase=parseInt(r.vals.p,10); m.manual = true; await DB.put(m); }
+    volCache.clear();
     status(its.length+' número'+(its.length!==1?'s':'')+' actualizado'+(its.length!==1?'s':'')); setTimeout(()=>status(''),2500); render(); };
   const st = $('serTot'); if(st) st.onclick = async () => { const s = curSeries(); let o={}; try{ o=JSON.parse(store.get('v:stot')||'{}'); }catch(e){}
     const secM = new Map(); s.items.forEach(m=>{ const o=secOf(m); secM.set(o.k,o); }); const phs = [...secM.keys()], multi = phs.length>1, t = seriesTotal(s);
@@ -1383,6 +1390,12 @@ function tile(m, showSeries, hideTitle, showPart){
     ${p&&!m.read?`<div class="bar"><b style="width:${p}%"></b></div>`:''}</div></div>`;
 }
 
+function volOptions(m){
+  issInit(); const names = new Set();
+  ISS.forEach(g=>{ if(m.issue==null || g.nums.has(m.issue)) names.add(g.name); });
+  if(m.vol) names.add(m.vol);
+  return [['','Automático'], ...[...names].sort().map(n=>[n,n])];
+}
 async function editComic(id){
   const m = lib.find(x=>x.id===id); if(!m) return;
   const r = await modal({ title:'Editar cómic', fields:[
@@ -1390,6 +1403,7 @@ async function editComic(id){
       {id:'issue',label:'Número',value:m.issue??'',type:'number'},
       {id:'title',label:'Título (agrupa los números dentro de la serie)',value:m.title||''},
       {id:'era',label:'Era',type:'select',value:eraOf(m),options:ERAS.map(e=>[e.id,e.name])},
+      {id:'vol',label:'Volumen / año (mover a mano)',type:'select',value:m.vol||'',options:volOptions(m)},
       {id:'phase',label:'Fase (High Republic)',type:'select',value:m.phase!=null?String(m.phase):'',options:[['','Automática'],['0','Sin fase'],['1','Fase I'],['2','Fase II'],['3','Fase III']]}],
     actions:[
       {id:'del',label:'Eliminar',cls:'danger',confirm:'¿Seguro? Pulsa otra vez'},
@@ -1413,6 +1427,8 @@ async function editComic(id){
     m.issue = r.vals.issue==='' ? null : parseInt(r.vals.issue,10);
     m.era = r.vals.era; m.title = r.vals.title.trim(); m.manual = true;
     if(r.vals.phase==='') delete m.phase; else m.phase = parseInt(r.vals.phase,10);
+    if(r.vals.vol){ m.vol = r.vals.vol; delete m.phase; } else delete m.vol;
+    volCache.clear();
     await DB.put(m);
     if(view.name==='series') view.series = m.series;
   }

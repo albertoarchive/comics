@@ -847,12 +847,13 @@ function groupSeries(list){
   return [...g.values()].sort((a,b)=>collator.compare(a.name,b.name));
 }
 function phaseOf(m){
+  if(m.phase!=null) return m.phase;
   const t = [m.name, m.title, m.series, m.folder].filter(Boolean).join(' ');
-  let x = t.match(/\b(?:phase|fase)[\s._-]*(iii|ii|i|3|2|1)\b/i);
+  const x = t.match(/\b(?:phase|fase)[\s._-]*(iii|ii|i|3|2|1)\b/i);
   if(x){ const v = x[1].toLowerCase(); return v==='iii'||v==='3' ? 3 : v==='ii'||v==='2' ? 2 : 1; }
-  if(/high republic|alta rep[uú]blica/i.test(t)){ x = t.match(/\b(202[1-6])\b/); if(x) return Math.min(3, +x[1]-2020); }
   return 0;
 }
+const PHN = ['Sin fase','Fase I','Fase II','Fase III'];
 function byIssue(a,b){
   const pa = phaseOf(a), pb = phaseOf(b); if(pa!==pb) return pa-pb;
   if(a.issue!=null && b.issue!=null && a.issue!==b.issue) return a.issue-b.issue;
@@ -1097,12 +1098,23 @@ function render(){
       <button class="btn pri" id="goRead">▶ ${cont.pos>0&&!cont.read?'Continuar':'Empezar'} ${esc(issueLabel(cont))}</button>
       <button class="btn" id="renSeries">Editar serie</button>
       <button class="btn" id="serCover">🖼 Portada</button>
+      <button class="btn" id="serPh">🏷 Asignar fase</button>
       <button class="btn" id="serTot">🔢 Total de números</button>
       <button class="btn danger" id="delSeries">Eliminar serie</button>
       <button class="btn ${isGroup()?'on':''}" id="grpToggle" title="Separar los números por título dentro de la serie">▤ Agrupar por título</button>
       <button class="btn ${view.desc?'on':''}" id="sortDir">${view.desc?'Más nuevo primero':'Más antiguo primero'}</button></div></div></div>
       ${gaps.length?`<div class="miss" style="margin:0 0 18px">Te faltan ${gaps.length} número${gaps.length>1?'s':''}: ${gaps.slice(0,30).map(x=>'#'+x).join(', ')}${gaps.length>30?'…':''}${tot?` (total ${tot.n}, ${tot.src})`:''}</div>`:''}
-      ${(()=>{ const plain = `<div class="grid">${seq.map(x=>x.gap?gapTile(s.name,x.gap,eraCol(eraOf(s.items[0]))):tile(x)).join('')}</div>`; return isGroup() ? groupedIssues(items, plain) : plain; })()}`;
+      ${(()=>{ const ec0 = eraCol(eraOf(s.items[0])), gt = x=>x.gap?gapTile(s.name,x.gap,ec0):tile(x);
+        const phs = [...new Set(s.items.map(phaseOf))].sort((a,b)=>a-b);
+        let plain;
+        if(phs.length>1){ if(view.desc) phs.reverse();
+          plain = phs.map(ph=>{ const its = s.items.filter(m=>phaseOf(m)===ph), g = gapList(its,0), gs = new Set(g); let sq = []; const asc = its.slice(); let prev=null;
+            const f1 = asc.find(m=>m.issue!=null); if(f1&&ph) for(let k=1;k<f1.issue;k++) if(gs.has(k)) sq.push({gap:k});
+            asc.forEach(m=>{ if(m.issue!=null){ if(prev!=null) for(let k=prev+1;k<m.issue;k++) if(gs.has(k)) sq.push({gap:k}); prev=Math.max(prev??m.issue,m.issue);} sq.push(m); });
+            if(view.desc) sq.reverse();
+            return `<section><h2><span class="dot"></span>${PHN[ph]} <small>${its.length} número${its.length>1?'s':''}${g.length&&ph?` · faltan ${g.length}`:''}</small></h2><div class="grid">${sq.map(gt).join('')}</div></section>`; }).join('');
+        } else plain = `<div class="grid">${seq.map(gt).join('')}</div>`;
+        return isGroup() ? groupedIssues(items, plain) : plain; })()}`;
   } else {
     const cont = filter ? [] : lib.filter(m=>m.pos>0&&!m.read).sort((a,b)=>b.opened-a.opened).slice(0,12);
     const series = groupSeries(list);
@@ -1142,6 +1154,15 @@ function render(){
   const gt = $('grpToggle'); if(gt) gt.onclick = () => { store.set('v:group', isGroup()?'0':'1'); render(); };
   const sd = $('sortDir'); if(sd) sd.onclick = () => { view.desc = !view.desc; render(); };
   const rs = $('renSeries'); if(rs) rs.onclick = renameSeries;
+  const sp = $('serPh'); if(sp) sp.onclick = async () => { const s = groupSeries(lib).find(x=>x.key===skey(view.series));
+    const r = await modal({title:'Asignar fase en «'+s.name+'»', text:'Pon la fase a un rango de números. Ej.: del 1 al 10 → Fase II. Dentro de cada fase, los números van de nuevo desde el 1.',
+      fields:[{id:'a',label:'Desde el número',type:'number',value:''},{id:'b',label:'Hasta el número (vacío = solo ese)',type:'number',value:''},{id:'p',label:'Fase',type:'select',value:'1',options:[['',' Automática (quitar)'],['0','Sin fase'],['1','Fase I'],['2','Fase II'],['3','Fase III']]}],
+      actions:[{id:'cancel',label:'Cancelar'},{id:'all',label:'A toda la serie'},{id:'save',label:'Aplicar',cls:'pri'}]});
+    if(!r||r.action==='cancel') return;
+    const a=parseInt(r.vals.a,10), b2=r.vals.b===''?a:parseInt(r.vals.b,10);
+    const its = r.action==='all' ? s.items : s.items.filter(m=>m.issue!=null && !isNaN(a) && m.issue>=a && m.issue<=b2);
+    for(const m of its){ if(r.vals.p==='') delete m.phase; else m.phase=parseInt(r.vals.p,10); m.manual = true; await DB.put(m); }
+    status(its.length+' número'+(its.length!==1?'s':'')+' actualizado'+(its.length!==1?'s':'')); setTimeout(()=>status(''),2500); render(); };
   const st = $('serTot'); if(st) st.onclick = async () => { const s = groupSeries(lib).find(x=>x.key===skey(view.series)); let o={}; try{ o=JSON.parse(store.get('v:stot')||'{}'); }catch(e){}
     const t = seriesTotal(s);
     const r = await modal({title:'Total de números de «'+s.name+'»', text:'Así la web te marca también los que faltan al final (y los del principio, si la serie empieza en el #1). Vacío = usar el catálogo.', fields:[{id:'n',label:'Total de números',type:'number',value:o[s.key]||(t?t.n:'')}], actions:[{id:'cancel',label:'Cancelar'},{id:'save',label:'Guardar',cls:'pri'}]});
@@ -1205,7 +1226,7 @@ function seriesTotal(s){
 }
 function gapList(items, total){
   const nums = [...new Set(items.map(m=>m.issue).filter(x=>x!=null))].sort((a,b)=>a-b), g = [];
-  if(!nums.length || new Set(items.map(phaseOf).filter(Boolean)).size>1) return g;
+  if(!nums.length || new Set(items.map(phaseOf)).size>1) return g;
   const lo = nums[0]>1 && nums[0]<400 ? 1 : nums[0], hi = Math.max(nums[nums.length-1], total||0);
   if(hi-lo < 400) for(let k=lo; k<=hi; k++) if(!nums.includes(k)) g.push(k);
   return g;
@@ -1228,7 +1249,8 @@ async function editComic(id){
       {id:'series',label:'Serie',value:m.series,list:true},
       {id:'issue',label:'Número',value:m.issue??'',type:'number'},
       {id:'title',label:'Título (agrupa los números dentro de la serie)',value:m.title||''},
-      {id:'era',label:'Era',type:'select',value:eraOf(m),options:ERAS.map(e=>[e.id,e.name])}],
+      {id:'era',label:'Era',type:'select',value:eraOf(m),options:ERAS.map(e=>[e.id,e.name])},
+      {id:'phase',label:'Fase (High Republic)',type:'select',value:m.phase!=null?String(m.phase):'',options:[['','Automática'],['0','Sin fase'],['1','Fase I'],['2','Fase II'],['3','Fase III']]}],
     actions:[
       {id:'del',label:'Eliminar',cls:'danger',confirm:'¿Seguro? Pulsa otra vez'},
       {id:'toggle',label:m.read?'Marcar no leído':'Marcar leído'},
@@ -1247,6 +1269,7 @@ async function editComic(id){
     m.series = r.vals.series.trim() || m.series;
     m.issue = r.vals.issue==='' ? null : parseInt(r.vals.issue,10);
     m.era = r.vals.era; m.title = r.vals.title.trim(); m.manual = true;
+    if(r.vals.phase==='') delete m.phase; else m.phase = parseInt(r.vals.phase,10);
     await DB.put(m);
     if(view.name==='series') view.series = m.series;
   }

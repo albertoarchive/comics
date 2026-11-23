@@ -1054,7 +1054,14 @@ function tlMatch(cat){
   const out = {}, claimed = new Set();
   // 1) por volumen identificado (nombre + número + portada): cada cómic va a SU volumen del catálogo
   const byVol = new Map(), taken = new Set();
-  lib.forEach(m=>{ const v = volOf(m); if(v){ if(!byVol.has(v)) byVol.set(v,[]); byVol.get(v).push(m); } });
+  // un cómic cuyo nombre coincide con una entrada propia (p. ej. «…Edge of Balance: Precedent») va a ella, no al volumen genérico que lo contiene
+  const exact = {}; const single = cat.filter(x=>x.k==='comic' && !x.vol && !x.m && x.nm);
+  lib.forEach(m=>{ const v = volOf(m); if(!v || m.vol) return;
+    const a = ntok(m.series||''), vt = ntok(v);
+    const e = single.find(x=>{ const t = ntok(x.nm); return t.size>vt.size && nsim(a,t)>=0.95; });
+    if(e){ (exact[e.id]=exact[e.id]||[]).push(m); taken.add(m.id); } });
+  Object.keys(exact).forEach(id=>{ const its = exact[id].sort(byIssue); out[id] = [{key:'x:'+id, name:its[0].series, items:its}]; claimed.add('x:'+id); });
+  lib.forEach(m=>{ if(taken.has(m.id)) return; const v = volOf(m); if(v){ if(!byVol.has(v)) byVol.set(v,[]); byVol.get(v).push(m); } });
   const runsOf = v => cat.filter(x=>x.vol===v);
   const place = (m, v, bucket) => { const rs = runsOf(v); if(!rs.length) return false;
     const e = rs.find(x=>m.issue!=null && m.issue>=x.a && m.issue<=x.b) || rs[0]; (bucket[e.id]=bucket[e.id]||[]).push(m); return true; };

@@ -195,7 +195,7 @@
     <div class="logo" id="logo"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="16" cy="16" r="4.5" fill="var(--acc)" stroke="none"/><ellipse cx="16" cy="16" rx="14" ry="5.5" transform="rotate(-24 16 16)" opacity=".85"/><circle cx="26.4" cy="10.2" r="1.6" fill="currentColor" stroke="none"/></svg><div><span>Archivo Galáctico</span><small>CÓMICS · STAR WARS</small></div></div>
     <nav class="tabs"><button class="tab on" data-v="home">Biblioteca</button><button class="tab" data-v="tl">Cronología</button></nav>
     <div class="search"><input id="q" type="search" placeholder="Buscar serie, personaje o número…" autocomplete="off"></div>
-    <label class="btn pri">＋ <span class="lbl">Añadir</span><input id="fFiles" type="file" multiple accept=".cbz,.cbr,.zip,.rar"></label>
+    <label class="btn pri">＋ <span class="lbl">Añadir</span><input id="fFiles" type="file" multiple accept=".cbz,.cbr,.zip,.rar,.pdf"></label>
     <button class="btn" id="bLink" title="Lee los cómics desde una carpeta de Drive, Dropbox u OneDrive sin copiarlos al navegador (Chrome/Edge en ordenador)">🔗 <span class="lbl">Enlazar</span></button>
     <label class="btn" title="Importa una carpeta entera: cada subcarpeta será una serie">📁 <span class="lbl">Carpeta</span><input id="fDir" type="file" webkitdirectory multiple></label>
   </header>
@@ -317,13 +317,47 @@ async function extractZip(file,en){
   }
   throw new Error('compresión no soportada');
 }
+
+/* ===== PDF (pdf.js desde internet; se carga solo cuando abres un PDF) ===== */
+const PDFJS = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/';
+let pdfLib = null, pdfCur = null;
+async function pdfInit(){
+  if(pdfLib) return pdfLib;
+  try{
+    const l = await import(PDFJS+'pdf.min.mjs');
+    const w = await (await fetch(PDFJS+'pdf.worker.min.mjs')).text();
+    l.GlobalWorkerOptions.workerSrc = URL.createObjectURL(new Blob([w],{type:'text/javascript'}));
+    pdfLib = l; return l;
+  }catch(e){ throw new Error('no he podido cargar el lector de PDF (hace falta conexión a internet)'); }
+}
+async function pdfDoc(file){
+  if(pdfCur && pdfCur.file===file) return pdfCur.doc;
+  const l = await pdfInit();
+  if(pdfCur){ try{ pdfCur.doc.destroy(); URL.revokeObjectURL(pdfCur.url); }catch(e){} pdfCur = null; }
+  const url = URL.createObjectURL(file);
+  const doc = await l.getDocument({url}).promise;
+  pdfCur = {file, doc, url}; return doc;
+}
+async function extractPdf(file,en){
+  const d = await pdfDoc(file), pg = await d.getPage(en.n);
+  const v0 = pg.getViewport({scale:1}), sc = Math.min(3, Math.max(1, 1500/v0.width)), vp = pg.getViewport({scale:sc});
+  const c = document.createElement('canvas'); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+  const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0,0,c.width,c.height);
+  await pg.render({canvasContext:ctx, viewport:vp}).promise; pg.cleanup();
+  return await new Promise(r=>c.toBlob(r,'image/jpeg',0.86));
+}
 async function extract(file,en){
+  if(en.pdf) return extractPdf(file,en);
   const type = MIME[en.name.split('.').pop().toLowerCase()] || 'image/jpeg';
   if(en.rar) return new Blob([await extractRar(file,en)],{type});
   return extractZip(file,en);
 }
 async function listPages(file){
   const hd = new Uint8Array(await file.slice(0,8).arrayBuffer());
+  if(hd[0]===0x25 && hd[1]===0x50 && hd[2]===0x44 && hd[3]===0x46){   // %PDF
+    const d = await pdfDoc(file);
+    return Array.from({length:d.numPages},(_,i)=>({pdf:true, n:i+1, name:'p'+String(i+1).padStart(4,'0')+'.jpg'}));
+  }
   const isRar = hd[0]===0x52 && hd[1]===0x61 && hd[2]===0x72 && hd[3]===0x21;
   let list;
   if(isRar){
@@ -680,7 +714,7 @@ function targetFor(p, target, forcedTitle){
 async function walkDir(dir, parent, out){
   for await (const [name, h] of dir.entries()){
     if(h.kind==='directory'){ if(!name.startsWith('.')) await walkDir(h, name, out); }
-    else if(/\.(cbz|cbr|zip|rar)$/i.test(name)) out.push({h, folder:parent});
+    else if(/\.(cbz|cbr|zip|rar|pdf)$/i.test(name)) out.push({h, folder:parent});
   }
 }
 async function syncLinked(dir){
@@ -689,7 +723,7 @@ async function syncLinked(dir){
   const files = [];
   for(const x of found){ try{ const f = await x.h.getFile(); f._h = x.h; f._folder = x.folder; files.push(f); }catch(e){} }
   await DB.kvSet('root', dir);
-  if(!files.length){ status('No he encontrado .cbz ni .cbr en esa carpeta.'); setTimeout(()=>status(''),4000); return; }
+  if(!files.length){ status('No he encontrado .cbz, .cbr ni .pdf en esa carpeta.'); setTimeout(()=>status(''),4000); return; }
   await importFiles(files);
 }
 async function linkFolder(){
@@ -708,8 +742,8 @@ async function linkFolder(){
 }
 
 async function importFiles(fileList, opts={}){
-  const files = [...fileList].filter(f => /\.(cbz|cbr|zip|rar)$/i.test(f.name));
-  if(!files.length){ status('No he visto ningún .cbz ni .cbr en lo que has soltado.'); setTimeout(()=>status(''),3500); return; }
+  const files = [...fileList].filter(f => /\.(cbz|cbr|zip|rar|pdf)$/i.test(f.name));
+  if(!files.length){ status('No he visto ningún .cbz, .cbr ni .pdf en lo que has soltado.'); setTimeout(()=>status(''),3500); return; }
   const known = new Set(lib.map(m=>m.name+':'+m.size));
   let ok = 0, dup = 0, moved = 0; const fails = [];
   for(let i=0;i<files.length;i++){
@@ -1006,8 +1040,8 @@ function render(){
   if(!persistent) html += `<div class="warn">⚠ Tu navegador no me deja guardar datos en esta página. Puedes leer, pero la biblioteca se borrará al cerrarla. Para que se guarde, abre la app desde tu propio alojamiento (por ejemplo Netlify).</div>`;
 
   if(!lib.length){
-    main.innerHTML = html + `<div class="empty"><h1>El archivo está vacío</h1><p>Añade tus cómics de Star Wars en <b>.cbz</b> o <b>.cbr</b> y los agrupo por serie y por era. Todo se queda en tu navegador: no se sube a ningún sitio.</p>
-      <div class="row" style="justify-content:center"><label class="btn pri">＋ Añadir cómics<input id="fFiles2" type="file" multiple accept=".cbz,.cbr,.zip,.rar"></label>
+    main.innerHTML = html + `<div class="empty"><h1>El archivo está vacío</h1><p>Añade tus cómics de Star Wars en <b>.cbz</b>, <b>.cbr</b> o <b>.pdf</b> y los agrupo por serie y por era. Todo se queda en tu navegador: no se sube a ningún sitio.</p>
+      <div class="row" style="justify-content:center"><label class="btn pri">＋ Añadir cómics<input id="fFiles2" type="file" multiple accept=".cbz,.cbr,.zip,.rar,.pdf"></label>
       <label class="btn">📁 Importar carpeta<input id="fDir2" type="file" webkitdirectory multiple></label></div>
       <p style="margin-top:22px;font-size:13px">O arrastra los archivos a esta ventana. Si los metes en carpetas, cada carpeta será una serie. La era se adivina por el nombre (Vader, Aphra, Alta República…) y la puedes cambiar con el botón ⋯.</p></div>`;
     const a=$('fFiles2'), b=$('fDir2');
@@ -1025,7 +1059,7 @@ function render(){
     html += `<button class="back" id="back">← Todas las series</button>
       <div class="shead"><div class="cover ${s.items[0].cover?'':'ph'}" ${coverStyle(s.items[0])}>${s.items[0].cover?'':phLetter(s.items[0])}</div>
       <div style="--ec:${eraCol(eraOf(s.items[0]))}"><h1>${esc(s.name)}</h1><div class="era">${esc(ERA[eraOf(s.items[0])].name)}</div><p>${s.items.length} número${s.items.length>1?'s':''} · ${done} leído${done!==1?'s':''}</p>
-      <div class="row"><label class="btn" id="addToSeries">＋ Añadir cómics a esta serie<input id="fToSeries" type="file" multiple accept=".cbz,.cbr,.zip,.rar"></label>
+      <div class="row"><label class="btn" id="addToSeries">＋ Añadir cómics a esta serie<input id="fToSeries" type="file" multiple accept=".cbz,.cbr,.zip,.rar,.pdf"></label>
       <button class="btn pri" id="goRead">▶ ${cont.pos>0&&!cont.read?'Continuar':'Empezar'} ${esc(issueLabel(cont))}</button>
       <button class="btn" id="renSeries">Editar serie</button>
       <button class="btn danger" id="delSeries">Eliminar serie</button>
@@ -1092,7 +1126,7 @@ function groupedIssues(items){
   shared.forEach(([k,v])=>v.items.sort(byIssue)); if(view.desc) shared.forEach(([k,v])=>v.items.reverse());
   const used = new Set(shared.map(x=>x[0]));
   const rest = items.filter(m=>!(m.title && used.has(skey(titleBase(m.title).base))));
-  let out = shared.map(([k,v])=>`<section><h2><span class="dot"></span>${esc(v.name)} <small>${v.items.length} número${v.items.length>1?'s':''}</small><label class="btn mini">＋ Añadir aquí<input type="file" multiple accept=".cbz,.cbr,.zip,.rar" data-gadd="${esc(v.name)}"></label></h2><div class="grid">${v.items.map(m=>tile(m,false,true,true)).join('')}</div></section>`).join('');
+  let out = shared.map(([k,v])=>`<section><h2><span class="dot"></span>${esc(v.name)} <small>${v.items.length} número${v.items.length>1?'s':''}</small><label class="btn mini">＋ Añadir aquí<input type="file" multiple accept=".cbz,.cbr,.zip,.rar,.pdf" data-gadd="${esc(v.name)}"></label></h2><div class="grid">${v.items.map(m=>tile(m,false,true,true)).join('')}</div></section>`).join('');
   if(rest.length) out += `<section><h2><span class="dot"></span>Otros números <small>${rest.length}</small></h2><div class="grid">${rest.map(m=>tile(m)).join('')}</div></section>`;
   return out;
 }

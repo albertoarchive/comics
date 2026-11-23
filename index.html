@@ -119,6 +119,7 @@
   .era::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--ec);box-shadow:0 0 8px var(--ec)}
   .badge.read{background:#2f9e6b;color:#fff}
   .dots{position:absolute;top:6px;right:6px;width:30px;height:30px;border-radius:50%;background:#000a;color:#fff;font-size:16px;line-height:30px;text-align:center;opacity:0;transition:.15s;backdrop-filter:blur(4px)}
+  .dots.yr{right:42px;font-size:14px}
   .tile:hover .dots,.dots:focus{opacity:1}
   @media (hover:none){.dots{opacity:1}}
 
@@ -1267,6 +1268,7 @@ function render(){
   main.innerHTML = html;
 
   main.querySelectorAll('[data-open]').forEach(el=>el.onclick = e => { if(e.target.closest('.dots')) return; openComic(el.dataset.open); });
+  main.querySelectorAll('[data-yr]').forEach(el=>el.onclick = e => { e.stopPropagation(); changeYear(el.dataset.yr); });
   main.querySelectorAll('[data-edit]').forEach(el=>el.onclick = e => { e.stopPropagation(); editComic(el.dataset.edit); });
   main.querySelectorAll('[data-series]').forEach(el=>el.onclick = () => { if(view.sel){ const k=el.dataset.key; view.sel.has(k)?view.sel.delete(k):view.sel.add(k); render(); return; } view = {name:'series', series:el.dataset.series, desc:false, era:view.era}; q.text=''; $('q').value=''; render(); window.scrollTo(0,0); });
   main.querySelectorAll('[data-era]').forEach(el=>el.onclick = () => { view.era = el.dataset.era; render(); });
@@ -1385,20 +1387,30 @@ function gapTile(name, n, ec){
 function tile(m, showSeries, hideTitle, showPart){
   const p = pct(m);
   return `<div class="tile" style="--ec:${eraCol(eraOf(m))}" data-open="${m.id}"><div class="cover ${m.cover?'':'ph'}" ${coverStyle(m)}>${m.cover?'':phLetter(m)}
-    ${m.read?'<span class="badge read">Leído</span>':(m.pos>0?`<span class="badge">${p}%</span>`:'')}<button class="dots" data-edit="${m.id}" title="Editar">⋯</button></div>
+    ${m.read?'<span class="badge read">Leído</span>':(m.pos>0?`<span class="badge">${p}%</span>`:'')}${m.issue!=null?`<button class="dots yr" data-yr="${m.id}" title="Cambiar año / volumen">📅</button>`:''}<button class="dots" data-edit="${m.id}" title="Editar">⋯</button></div>
     <div class="meta"><div class="nm">${showSeries?esc(m.series)+' ':''}${esc(hideTitle?issueLabel(m)+(showPart&&titleBase(m.title).part!=null?' · Parte '+titleBase(m.title).part:''):fullLabel(m))}</div><div class="sub">${m.pages} págs.</div>
     ${p&&!m.read?`<div class="bar"><b style="width:${p}%"></b></div>`:''}</div></div>`;
 }
 
 function volOptions(m){
-  issInit(); const names = new Set(), st = ntok(m.series||'');
-  // todos los volúmenes de la misma serie (aunque no tengan ese número: un archivo puede estar mal numerado), y los que sí tienen el número
+  issInit(); const same = new Set(), num = new Set(), st = ntok(m.series||'');
   ISS.forEach(g=>{
-    const same = st.size && g.toks.size && ([...st].every(w=>g.toks.has(w)) || [...g.toks].every(w=>st.has(w)));
-    if(same || m.issue==null || g.nums.has(m.issue)) names.add(g.name);
+    if(st.size && g.toks.size && ([...st].every(w=>g.toks.has(w)) || [...g.toks].every(w=>st.has(w)))) same.add(g.name);
+    else if(m.issue==null || g.nums.has(m.issue)) num.add(g.name);
   });
+  const names = same.size ? same : num;   // si la serie tiene volúmenes propios, solo esos
   if(m.vol) names.add(m.vol);
   return [['','Automático'], ...[...names].sort().map(n=>[n,n])];
+}
+async function changeYear(id){
+  const m = lib.find(x=>x.id===id); if(!m) return;
+  const cur = volOf(m);
+  const r = await modal({ title:'Cambiar año · '+m.series+' #'+m.issue, fields:[
+    {id:'vol',label:'Año / volumen',type:'select',value:m.vol||cur||'',options:volOptions(m).map(o=>o[0]===''?['','Automático']:o)}],
+    actions:[{id:'cancel',label:'Cancelar'},{id:'save',label:'Guardar',cls:'pri'}]});
+  if(!r || r.action!=='save') return;
+  if(r.vals.vol){ m.vol = r.vals.vol; delete m.phase; } else delete m.vol;
+  m.manual = true; volCache.clear(); await DB.put(m); render();
 }
 async function editComic(id){
   const m = lib.find(x=>x.id===id); if(!m) return;

@@ -1108,11 +1108,12 @@ function render(){
         const phs = [...new Set(s.items.map(phaseOf))].sort((a,b)=>a-b);
         let plain;
         if(phs.length>1){ if(view.desc) phs.reverse();
-          plain = phs.map(ph=>{ const its = s.items.filter(m=>phaseOf(m)===ph), g = gapList(its,0), gs = new Set(g); let sq = []; const asc = its.slice(); let prev=null;
-            const f1 = asc.find(m=>m.issue!=null); if(f1&&ph) for(let k=1;k<f1.issue;k++) if(gs.has(k)) sq.push({gap:k});
+          plain = phs.map(ph=>{ const its = s.items.filter(m=>phaseOf(m)===ph), pt = phaseTotal(s,ph), g = gapList(its,pt&&pt.n), gs = new Set(g); let sq = []; const asc = its.slice(); let prev=null;
+            const f1 = asc.find(m=>m.issue!=null); if(f1) for(let k=1;k<f1.issue;k++) if(gs.has(k)) sq.push({gap:k});
             asc.forEach(m=>{ if(m.issue!=null){ if(prev!=null) for(let k=prev+1;k<m.issue;k++) if(gs.has(k)) sq.push({gap:k}); prev=Math.max(prev??m.issue,m.issue);} sq.push(m); });
+            if(prev!=null) for(let k=prev+1;k<=Math.max(...g,prev);k++) if(gs.has(k)) sq.push({gap:k});
             if(view.desc) sq.reverse();
-            return `<section><h2><span class="dot"></span>${PHN[ph]} <small>${its.length} número${its.length>1?'s':''}${g.length&&ph?` · faltan ${g.length}`:''}</small></h2><div class="grid">${sq.map(gt).join('')}</div></section>`; }).join('');
+            return `<section><h2><span class="dot"></span>${PHN[ph]} <small>${its.length} número${its.length>1?'s':''}${g.length?` · faltan ${g.length}: ${g.slice(0,25).map(x=>'#'+x).join(', ')}${g.length>25?'…':''}`:''}${pt?` · total ${pt.n}`:''}</small></h2><div class="grid">${sq.map(gt).join('')}</div></section>`; }).join('');
         } else plain = `<div class="grid">${seq.map(gt).join('')}</div>`;
         return isGroup() ? groupedIssues(items, plain) : plain; })()}`;
   } else {
@@ -1164,9 +1165,13 @@ function render(){
     for(const m of its){ if(r.vals.p==='') delete m.phase; else m.phase=parseInt(r.vals.p,10); m.manual = true; await DB.put(m); }
     status(its.length+' número'+(its.length!==1?'s':'')+' actualizado'+(its.length!==1?'s':'')); setTimeout(()=>status(''),2500); render(); };
   const st = $('serTot'); if(st) st.onclick = async () => { const s = groupSeries(lib).find(x=>x.key===skey(view.series)); let o={}; try{ o=JSON.parse(store.get('v:stot')||'{}'); }catch(e){}
-    const t = seriesTotal(s);
-    const r = await modal({title:'Total de números de «'+s.name+'»', text:'Así la web te marca también los que faltan al final (y los del principio, si la serie empieza en el #1). Vacío = usar el catálogo.', fields:[{id:'n',label:'Total de números',type:'number',value:o[s.key]||(t?t.n:'')}], actions:[{id:'cancel',label:'Cancelar'},{id:'save',label:'Guardar',cls:'pri'}]});
-    if(!r||r.action!=='save') return; const n=parseInt(r.vals.n,10); if(n>0) o[s.key]=n; else delete o[s.key]; store.set('v:stot',JSON.stringify(o)); render(); };
+    const phs = [...new Set(s.items.map(phaseOf))].sort((a,b)=>a-b), multi = phs.length>1, t = seriesTotal(s);
+    const fields = multi ? phs.map(ph=>({id:'n'+ph,label:'Total de números · '+PHN[ph],type:'number',value:o[s.key+'|'+ph]||''})) : [{id:'n',label:'Total de números',type:'number',value:o[s.key]||(t?t.n:'')}];
+    const r = await modal({title:'Total de números de «'+s.name+'»', text:'Así la web te marca también los que faltan al final (y los del principio, si empieza en el #1). Vacío = usar el catálogo (solo en series sin fases).', fields, actions:[{id:'cancel',label:'Cancelar'},{id:'save',label:'Guardar',cls:'pri'}]});
+    if(!r||r.action!=='save') return;
+    if(multi) phs.forEach(ph=>{ const n=parseInt(r.vals['n'+ph],10); if(n>0) o[s.key+'|'+ph]=n; else delete o[s.key+'|'+ph]; });
+    else { const n=parseInt(r.vals.n,10); if(n>0) o[s.key]=n; else delete o[s.key]; }
+    store.set('v:stot',JSON.stringify(o)); render(); };
   const sc = $('serCover'); if(sc) sc.onclick = () => seriesCoverDialog(groupSeries(lib).find(x=>x.key===skey(view.series)));
   main.querySelectorAll('[data-gadd]').forEach(inp=>inp.onchange = e => { importFiles(e.target.files,{series:view.series,title:inp.dataset.gadd}); e.target.value=''; });
   const fts = $('fToSeries'); if(fts) fts.onchange = e => { importFiles(e.target.files,{series:view.series}); e.target.value=''; };
@@ -1222,6 +1227,11 @@ function seriesTotal(s){
   let o={}; try{ o=JSON.parse(store.get('v:stot')||'{}'); }catch(e){}
   if(o[s.key]>0) return {n:o[s.key], src:'indicado por ti'};
   try{ const cat=tlCatalog(), mt=tlMatch(cat); for(const e of cat){ const hit=(mt.out[e.id]||[]).some(x=>x.key===s.key); const n=parseInt(e.n); if(hit && e.k==='comic' && n>=2 && !e.short) return {n, src:'catálogo'}; } }catch(e){}
+  return null;
+}
+function phaseTotal(s, ph){
+  let o={}; try{ o=JSON.parse(store.get('v:stot')||'{}'); }catch(e){}
+  if(o[s.key+'|'+ph]>0) return {n:o[s.key+'|'+ph], src:'indicado por ti'};
   return null;
 }
 function gapList(items, total){

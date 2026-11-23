@@ -49,6 +49,10 @@
   .tab.on{background:var(--acc);color:#02101c}
   .tlsum{display:flex;align-items:center;gap:14px;margin:0 0 18px;color:var(--mute);font-size:13.5px;flex-wrap:wrap}
   .tlsum .bar{width:180px;height:5px}
+  .tlnext{border:1px solid var(--acc);border-radius:14px;padding:16px 18px;margin:0 0 20px;background:linear-gradient(135deg,#0f1c33,#0b1222);box-shadow:0 0 28px #4db8ff22;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+  .tlnext .tx{flex:1;min-width:220px}.tlnext small{color:var(--acc);text-transform:uppercase;letter-spacing:.1em;font-size:11px}
+  .tlnext h3{margin:4px 0 2px;font-size:20px}.tlnext p{margin:0;color:var(--mute);font-size:13px}
+  .ti.next .tc{box-shadow:0 0 0 2px var(--acc),0 0 26px #4db8ff55}
   .tlkey{color:var(--mute);font-size:12.5px;margin:0 0 22px;max-width:70ch}
   .tl{position:relative;max-width:880px;margin:0 auto 40px}
   .tl::before{content:"";position:absolute;left:85px;top:6px;bottom:6px;width:2px;background:var(--line)}
@@ -1002,7 +1006,15 @@ function renderTimeline(filter){
   const route = rows.filter(inRoute), routeDone = route.filter(r=>r.s.done).length;
   const q2 = filter||'';
   const shown = rows.filter(r=>vis(r) && tests[f](r) && (!q2 || r.e.t.toLowerCase().includes(q2)));
-  let h = `<div class="tlsum"><b>Mi ruta: ${routeDone} de ${route.length} completados</b><div class="bar" style="--ec:var(--acc2)"><b style="width:${route.length?Math.round(routeDone/route.length*100):0}%"></b></div></div>`;
+  const nx = route.find(r=>!r.s.done);
+  let nb = '';
+  if(nx){ const e = nx.e, s = nx.s; let act = '', sub = '';
+    if(e.k==='comic'){ const started = s.rd>0; sub = started ? `Llevas ${s.rd} de ${s.n} leídos` : 'Aún no has empezado'; act = `<button class="btn pri" data-nxread="${esc(s.name)}">▶ ${started?'Continuar':'Empezar a leer'}</button>`; }
+    else if(e.eps){ const i = e.eps.findIndex((_,k)=>!seen[e.id+'|'+k]); sub = `Siguiente capítulo: <b>${i+1}. ${esc(e.eps[i])}</b> · ${s.n}/${s.tot} vistos`; act = `<a class="btn pri" href="${disney(e)}" target="_blank" rel="noopener">▶ Ver en Disney+</a><button class="btn" data-nxep="${e.id}|${i}">✓ Capítulo visto</button>`; }
+    else { sub = 'Película'; act = `<a class="btn pri" href="${disney(e)}" target="_blank" rel="noopener">▶ Ver en Disney+</a><button class="btn" data-seen="${e.id}">✓ Ya la he visto</button>`; }
+    nb = `<div class="tlnext"><div class="tx"><small>${routeDone?'Siguiente en tu ruta':'Empieza aquí'}</small><h3>${esc(e.t)}</h3><p>${fmtY(e)} · ${e.c==='C'?'Canon':e.c==='L'?'Legends':''} · ${sub}</p></div><div class="row" style="gap:8px">${act}<button class="btn" data-nxgo="${e.id}">Ver en la cronología ↓</button></div></div>`;
+  } else if(route.length) nb = `<div class="tlnext"><div class="tx"><small>¡Ruta completada!</small><h3>Has terminado todo lo de tu ruta</h3></div></div>`;
+  let h = nb + `<div class="tlsum"><b>Mi ruta: ${routeDone} de ${route.length} completados</b><div class="bar" style="--ec:var(--acc2)"><b style="width:${route.length?Math.round(routeDone/route.length*100):0}%"></b></div></div>`;
   h += `<p class="tlkey">La ruta junta lo esencial (películas y series canon) con los cómics recomendados por los foros que tienes en tu biblioteca. Tus series que no tengo catalogadas se colocan según su era; con «📅 Fecha» las pones en su año exacto. Los botones de Disney+ abren su buscador con el título (necesitas tu cuenta). Año: <b>a.Y.</b> antes de la batalla de Yavin, <b>d.Y.</b> después; «≈» es aproximado. <b>Legends</b> no es canon: algunas historias contradicen a las series y películas.</p>`;
   h += `<div class="chips">` + Object.keys(labels).map(k=>`<button class="chip ${f===k?'on':''}" data-tlf="${k}">${labels[k]} <em>${rows.filter(r=>(k==='short'||vis(r)) && tests[k](r)).length}</em></button>`).join('') + `</div>`;
   if(!shown.length) h += `<p style="color:var(--mute)">Nada que mostrar con este filtro.</p>`;
@@ -1021,9 +1033,9 @@ function renderTimeline(filter){
       if(op){ const all = e.eps.every((_,i)=>seen[e.id+'|'+i]);
         panel = `<div class="eps"><div class="sh"><b>${e.eps.length} capítulos, en orden cronológico</b><button class="btn mini" data-epall="${e.id}|${e.eps.length}">${all?'Quitar todos':'Marcar todos'}</button></div><div class="epl">${e.eps.map((t,i)=>`<button class="ep2 ${seen[e.id+'|'+i]?'on':''}" data-ep="${e.id}|${i}"><i>${i+1}</i>${esc(t)}</button>`).join('')}</div></div>`; }
     } else act = `<div class="tact"><a class="btn pri" href="${disney(e)}" target="_blank" rel="noopener">▶ Ver en Disney+</a><button class="btn ${s.done?'on':''}" data-seen="${e.id}">${s.done?'✓ Visto':'Marcar como visto'}</button></div>`;
-    return `<div class="ti" style="--ec:${ec}"><div class="ty">${fmtY(e)}</div><div class="td"></div>
+    return `<div class="ti ${nx&&nx.e.id===e.id?'next':''}" id="ti_${esc(e.id)}" style="--ec:${ec}"><div class="ty">${fmtY(e)}</div><div class="td"></div>
       <div class="tc ${s.done?'done':''}"><span class="tk">${TLK[e.k]}</span><div class="tb"><div class="tn"><a class="tlink" href="${wiki(e)}" target="_blank" rel="noopener" title="Abrir en Wookieepedia">${esc(e.t)} <span>↗</span></a></div>${e.n?`<div class="tnote">${esc(e.n)}</div>`:''}
-      <div class="tags"><span class="tag ${e.c==='C'?'can':e.c==='L'?'leg':''}">${e.c==='C'?'Canon':e.c==='L'?'Legends':'¿Canon o Legends?'}</span>${e.auto?'<span class="tag">Tu serie</span>':''}${e.short?'<span class="tag">Relato suelto</span>':''}${e.ess?'<span class="tag ess">Esencial</span>':''}${e.rec?'<span class="tag ess">Recomendado</span>':''}${s.owned?'<span class="tag own">En tu biblioteca</span>':''}${e.vol?'<span class="tag own">Vía volumen: '+esc(e.vol)+'</span>':''}${s.owned===false?'<span class="tag lack">Falta</span>':''}</div>
+      <div class="tags">${nx&&nx.e.id===e.id?'<span class="tag ess">▶ Siguiente</span>':''}<span class="tag ${e.c==='C'?'can':e.c==='L'?'leg':''}">${e.c==='C'?'Canon':e.c==='L'?'Legends':'¿Canon o Legends?'}</span>${e.auto?'<span class="tag">Tu serie</span>':''}${e.short?'<span class="tag">Relato suelto</span>':''}${e.ess?'<span class="tag ess">Esencial</span>':''}${e.rec?'<span class="tag ess">Recomendado</span>':''}${s.owned?'<span class="tag own">En tu biblioteca</span>':''}${e.vol?'<span class="tag own">Vía volumen: '+esc(e.vol)+'</span>':''}${s.owned===false?'<span class="tag lack">Falta</span>':''}</div>
       <div class="srcs">Fuente: ${esc(e.src||'tu biblioteca')} · <a href="${wiki(e)}" target="_blank" rel="noopener">Wookieepedia ↗</a> · <a href="${wikiEs(e)}" target="_blank" rel="noopener">Wiki en español ↗</a>${e.k!=='comic'?` · <a href="${disney(e)}" target="_blank" rel="noopener">Disney+ ↗</a>`:''}</div></div>${act}${panel}</div></div>`;
   }).join('') + `</div>`;
   return h;
@@ -1051,6 +1063,9 @@ function render(){
       const v = parseFloat(String(r.vals.y).replace(',','.')); if(isNaN(v)) delete yo[k]; else yo[k]=v;
       if(r.vals.c) co[k]=r.vals.c; else delete co[k]; store.set('v:tlc', JSON.stringify(co));
       store.set('v:tly', JSON.stringify(yo)); render(); });
+    main.querySelectorAll('[data-nxread]').forEach(el=>el.onclick = () => { const s = groupSeries(lib).find(x=>x.key===skey(el.dataset.nxread)); if(s) openComic(nextToRead(s.items).id); });
+    main.querySelectorAll('[data-nxep]').forEach(el=>el.onclick = () => { const sn=seenGet(); sn[el.dataset.nxep]=1; store.set('v:seen',JSON.stringify(sn)); render(); });
+    main.querySelectorAll('[data-nxgo]').forEach(el=>el.onclick = () => { const t=document.getElementById('ti_'+el.dataset.nxgo); if(t) t.scrollIntoView({behavior:'smooth',block:'center'}); });
     main.querySelectorAll('[data-tll]').forEach(el=>el.onclick = async () => {
       let ml={}; try{ ml=JSON.parse(store.get('v:tll')||'{}'); }catch(e){}
       const t = el.dataset.tll, sers = groupSeries(lib).sort((a,b)=>a.name.localeCompare(b.name,'es'));

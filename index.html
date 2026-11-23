@@ -1076,9 +1076,11 @@ function render(){
     let items = s.items.slice(); if(view.desc) items.reverse();
     const cont = nextToRead(s.items);
     const done = s.items.filter(m=>m.read).length;
-    const gaps = gapList(s.items), gset = new Set(gaps);
+    const tot = seriesTotal(s), gaps = gapList(s.items, tot&&tot.n), gset = new Set(gaps);
     let seq = []; { const asc = s.items.slice(); let prev = null;
+      const first = asc.find(m=>m.issue!=null); if(first) for(let k=1;k<first.issue;k++) if(gset.has(k)) seq.push({gap:k});
       asc.forEach(m=>{ if(m.issue!=null){ if(prev!=null) for(let k=prev+1;k<m.issue;k++) if(gset.has(k)) seq.push({gap:k}); prev = Math.max(prev??m.issue, m.issue); } seq.push(m); });
+      if(prev!=null) for(let k=prev+1;k<=Math.max(...gaps,prev);k++) if(gset.has(k)) seq.push({gap:k});
       if(view.desc) seq.reverse(); }
     html += `<button class="back" id="back">← Todas las series</button>
       <div class="shead"><div class="cover ${coverItem(s).cover?'':'ph'}" ${coverStyle(coverItem(s))}>${coverItem(s).cover?'':phLetter(coverItem(s))}</div>
@@ -1087,10 +1089,11 @@ function render(){
       <button class="btn pri" id="goRead">▶ ${cont.pos>0&&!cont.read?'Continuar':'Empezar'} ${esc(issueLabel(cont))}</button>
       <button class="btn" id="renSeries">Editar serie</button>
       <button class="btn" id="serCover">🖼 Portada</button>
+      <button class="btn" id="serTot">🔢 Total de números</button>
       <button class="btn danger" id="delSeries">Eliminar serie</button>
       <button class="btn ${isGroup()?'on':''}" id="grpToggle" title="Separar los números por título dentro de la serie">▤ Agrupar por título</button>
       <button class="btn ${view.desc?'on':''}" id="sortDir">${view.desc?'Más nuevo primero':'Más antiguo primero'}</button></div></div></div>
-      ${gaps.length?`<div class="miss" style="margin:0 0 18px">Te faltan ${gaps.length} número${gaps.length>1?'s':''} entre el #${Math.min(...s.items.map(m=>m.issue).filter(x=>x!=null))} y el #${Math.max(...s.items.map(m=>m.issue).filter(x=>x!=null))}: ${gaps.slice(0,30).map(x=>'#'+x).join(', ')}${gaps.length>30?'…':''}</div>`:''}
+      ${gaps.length?`<div class="miss" style="margin:0 0 18px">Te faltan ${gaps.length} número${gaps.length>1?'s':''}: ${gaps.slice(0,30).map(x=>'#'+x).join(', ')}${gaps.length>30?'…':''}${tot?` (total ${tot.n}, ${tot.src})`:''}</div>`:''}
       ${(()=>{ const plain = `<div class="grid">${seq.map(x=>x.gap?gapTile(s.name,x.gap,eraCol(eraOf(s.items[0]))):tile(x)).join('')}</div>`; return isGroup() ? groupedIssues(items, plain) : plain; })()}`;
   } else {
     const cont = filter ? [] : lib.filter(m=>m.pos>0&&!m.read).sort((a,b)=>b.opened-a.opened).slice(0,12);
@@ -1131,6 +1134,10 @@ function render(){
   const gt = $('grpToggle'); if(gt) gt.onclick = () => { store.set('v:group', isGroup()?'0':'1'); render(); };
   const sd = $('sortDir'); if(sd) sd.onclick = () => { view.desc = !view.desc; render(); };
   const rs = $('renSeries'); if(rs) rs.onclick = renameSeries;
+  const st = $('serTot'); if(st) st.onclick = async () => { const s = groupSeries(lib).find(x=>x.key===skey(view.series)); let o={}; try{ o=JSON.parse(store.get('v:stot')||'{}'); }catch(e){}
+    const t = seriesTotal(s);
+    const r = await modal({title:'Total de números de «'+s.name+'»', text:'Así la web te marca también los que faltan al final (y los del principio, si la serie empieza en el #1). Vacío = usar el catálogo.', fields:[{id:'n',label:'Total de números',type:'number',value:o[s.key]||(t?t.n:'')}], actions:[{id:'cancel',label:'Cancelar'},{id:'save',label:'Guardar',cls:'pri'}]});
+    if(!r||r.action!=='save') return; const n=parseInt(r.vals.n,10); if(n>0) o[s.key]=n; else delete o[s.key]; store.set('v:stot',JSON.stringify(o)); render(); };
   const sc = $('serCover'); if(sc) sc.onclick = () => seriesCoverDialog(groupSeries(lib).find(x=>x.key===skey(view.series)));
   main.querySelectorAll('[data-gadd]').forEach(inp=>inp.onchange = e => { importFiles(e.target.files,{series:view.series,title:inp.dataset.gadd}); e.target.value=''; });
   const fts = $('fToSeries'); if(fts) fts.onchange = e => { importFiles(e.target.files,{series:view.series}); e.target.value=''; };
@@ -1182,9 +1189,17 @@ function seriesTile(s){
     <div class="meta"><div class="nm">${esc(s.name)}</div><div class="sub">${s.items.length} número${s.items.length>1?'s':''}${read?` · ${read} leído${read>1?'s':''}`:''}</div>
     <div class="bar"><b style="width:${p}%"></b></div></div></div>`;
 }
-function gapList(items){
+function seriesTotal(s){
+  let o={}; try{ o=JSON.parse(store.get('v:stot')||'{}'); }catch(e){}
+  if(o[s.key]>0) return {n:o[s.key], src:'indicado por ti'};
+  try{ const cat=tlCatalog(), mt=tlMatch(cat); for(const e of cat){ const hit=(mt.out[e.id]||[]).some(x=>x.key===s.key); const n=parseInt(e.n); if(hit && e.k==='comic' && n>=2 && !e.short) return {n, src:'catálogo'}; } }catch(e){}
+  return null;
+}
+function gapList(items, total){
   const nums = [...new Set(items.map(m=>m.issue).filter(x=>x!=null))].sort((a,b)=>a-b), g = [];
-  if(nums.length>1 && nums[nums.length-1]-nums[0] < 400) for(let k=nums[0]; k<=nums[nums.length-1]; k++) if(!nums.includes(k)) g.push(k);
+  if(!nums.length) return g;
+  const lo = nums[0]>1 && nums[0]<400 ? 1 : nums[0], hi = Math.max(nums[nums.length-1], total||0);
+  if(hi-lo < 400) for(let k=lo; k<=hi; k++) if(!nums.includes(k)) g.push(k);
   return g;
 }
 function gapTile(name, n, ec){

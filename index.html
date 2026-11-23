@@ -240,9 +240,10 @@ async function ensureAccess(h){
 const DB = {
   async init(){
     try{
+      // se abre la versión que ya exista (v1 o v2): no hay cambios de esquema, así que nada se bloquea ni se pierde
       idb = await new Promise((res,rej)=>{
-        const o = indexedDB.open('vinetas',2);
-        o.onupgradeneeded = () => { const d=o.result; ['meta','files','kv'].forEach(n=>{ if(!d.objectStoreNames.contains(n)) d.createObjectStore(n,{keyPath:'id'}); }); };
+        const o = indexedDB.open('vinetas');
+        o.onupgradeneeded = () => { const d=o.result; ['meta','files'].forEach(n=>{ if(!d.objectStoreNames.contains(n)) d.createObjectStore(n,{keyPath:'id'}); }); };
         o.onsuccess = () => res(o.result); o.onerror = () => rej(o.error); o.onblocked = () => rej(new Error('blocked'));
       });
       // prueba real de escritura
@@ -252,11 +253,11 @@ const DB = {
       try{ navigator.storage && navigator.storage.persist && navigator.storage.persist(); }catch(e){}
     }catch(e){ idb = null; persistent = false; }
   },
-  async all(){ return persistent ? await rq(idb.transaction('meta').objectStore('meta').getAll()) : [...mem.meta.values()]; },
+  async all(){ return persistent ? (await rq(idb.transaction('meta').objectStore('meta').getAll())).filter(m=>!String(m.id).startsWith('__')) : [...mem.meta.values()]; },
   async put(m){ if(persistent) await rq(idb.transaction('meta','readwrite').objectStore('meta').put(m)); else mem.meta.set(m.id,m); },
   async putFile(id,blob){ const rec = (typeof FileSystemFileHandle!=='undefined' && blob instanceof FileSystemFileHandle) ? {id,handle:blob} : {id,blob}; if(persistent) await rq(idb.transaction('files','readwrite').objectStore('files').put(rec)); else mem.files.set(id,blob); },
-  async kvGet(k){ if(!persistent) return null; const r = await rq(idb.transaction('kv').objectStore('kv').get(k)); return r && r.v; },
-  async kvSet(k,v){ if(persistent) await rq(idb.transaction('kv','readwrite').objectStore('kv').put({id:k,v})); },
+  async kvGet(k){ if(!persistent) return null; const r = await rq(idb.transaction('meta').objectStore('meta').get('__'+k)); return r && r.v; },
+  async kvSet(k,v){ if(persistent) await rq(idb.transaction('meta','readwrite').objectStore('meta').put({id:'__'+k,v})); },
   async getFile(id){
     if(persistent){
       const r = await rq(idb.transaction('files').objectStore('files').get(id)); if(!r) return null;

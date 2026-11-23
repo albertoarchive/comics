@@ -205,6 +205,7 @@
     <div class="search"><input id="q" type="search" placeholder="Buscar serie, personaje o número…" autocomplete="off"></div>
     <label class="btn pri">＋ <span class="lbl">Añadir</span><input id="fFiles" type="file" multiple accept=".cbz,.cbr,.zip,.rar,.pdf"></label>
     <button class="btn" id="bLink" title="Lee los cómics desde una carpeta de Drive, Dropbox u OneDrive sin copiarlos al navegador (Chrome/Edge en ordenador)">🔗 <span class="lbl">Enlazar</span></button>
+    <button class="btn" id="bUndo" title="Quita los cómics de la última importación" style="display:none">↩ <span class="lbl">Deshacer importación</span></button>
     <label class="btn" title="Importa una carpeta entera: cada subcarpeta será una serie">📁 <span class="lbl">Carpeta</span><input id="fDir" type="file" webkitdirectory multiple></label>
   </header>
   <main id="main"></main>
@@ -1156,6 +1157,7 @@ function renderTimeline(filter){
 
 function render(){
   setTimeout(ensureGrids, 80);
+  { const u = $('bUndo'); if(u) u.style.display = lastBatch().length ? '' : 'none'; }
   const main = $('main');
   const filter = q.text.trim().toLowerCase();
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on', (t.dataset.v==='tl') === (view.name==='tl')));
@@ -1450,6 +1452,22 @@ async function editComic(id){
   }
   render();
 }
+function lastBatch(){
+  const a = lib.filter(m=>m.added).sort((x,y)=>y.added-x.added); if(!a.length) return [];
+  const out = [a[0]]; for(let i=1;i<a.length;i++){ if(a[i-1].added - a[i].added > 10*60*1000) break; out.push(a[i]); }
+  return out;
+}
+async function undoImport(){
+  const b = lastBatch(); if(!b.length) return;
+  const when = new Date(b[0].added).toLocaleString('es-ES',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+  const names = [...new Set(b.map(m=>m.series))].slice(0,6).join(', ');
+  const r = await modal({ title:'Deshacer la última importación', text:`Se quitarán ${b.length} cómic${b.length>1?'s':''} importados hacia el ${when} (${names}${new Set(b.map(m=>m.series)).size>6?'…':''}). Tus ajustes y los demás cómics no se tocan. Esto no se puede deshacer.`,
+    actions:[{id:'cancel',label:'Cancelar'},{id:'go',label:'Quitar '+b.length,cls:'danger',confirm:'¿Seguro? Pulsa otra vez'}]});
+  if(!r || r.action!=='go') return;
+  for(const m of b){ await DB.del(m.id); if(covers.has(m.id)){ URL.revokeObjectURL(covers.get(m.id)); covers.delete(m.id); } }
+  const ids = new Set(b.map(m=>m.id)); lib = lib.filter(m=>!ids.has(m.id)); volCache.clear();
+  status('Quitados '+b.length+' cómics'); setTimeout(()=>status(''),3000); render();
+}
 async function deleteSeries(keys){
   const groups = groupSeries(lib).filter(g=>keys.includes(g.key));
   const total = groups.reduce((n,g)=>n+g.items.length,0);
@@ -1639,6 +1657,7 @@ $('stage').addEventListener('touchend',e=>{
 /* =====================================================
    ENTRADAS GLOBALES
    ===================================================== */
+$('bUndo').onclick = undoImport;
 $('fFiles').onchange = e => { importFiles(e.target.files); e.target.value=''; };
 $('fDir').onchange = e => { importFiles(e.target.files); e.target.value=''; };
 document.querySelectorAll('.tab').forEach(t=>t.onclick = () => { view = t.dataset.v==='tl' ? {name:'tl', f:(view.f||'ruta')} : {name:'home', era:'all'}; q.text=''; $('q').value=''; render(); window.scrollTo(0,0); });

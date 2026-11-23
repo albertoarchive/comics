@@ -630,6 +630,7 @@ async function extractRar(file,en){
 /* =====================================================
    NOMBRES → SERIE + NÚMERO
    ===================================================== */
+const noSWx = t => { const r = String(t||'').replace(/^star\s*wars\b[\s\-–—,.:_]*/i,'').trim(); return r || t; };
 function parseName(fileName, folder){
   let s = fileName.replace(/\.[^.]+$/,'').replace(/_+/g,' ');
   s = s.replace(/\([^)]*\)|\[[^\]]*\]/g,' ').replace(/\s+/g,' ').trim();
@@ -643,7 +644,9 @@ function parseName(fileName, folder){
     series = m[1].trim(); issue = parseInt(m[2],10); title = (m[3]||'').trim();
   }
   series = series.replace(/^[\s\-–—,.:#]+|[\s\-–—,.:#]+$/g,'').trim();
-  if(!series) series = folder || 'Sin serie';
+  const noSW = t => { const r = t.replace(/^star\s*wars\b[\s\-–—,.:_]*/i,'').trim(); return r || t; };
+  series = noSW(series);
+  if(!series) series = noSWx(folder) || 'Sin serie';
   return { series, issue, lead, title };
 }
 
@@ -762,7 +765,7 @@ async function importFiles(fileList, opts={}){
       const folder = f._folder!=null ? f._folder : (parts.length>1 ? parts[parts.length-2] : '');
       const p = parseName(f.name, folder);
       let {series,issue} = p, title = p.title || '';
-      if(p.lead && folder){ title = series; series = folder; }
+      if(p.lead && folder){ title = series; series = noSWx(folder); }
       const id = 'c'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
       const cover = await makeCover(f, entries);
       let era = eraGuess(series), manual = false;
@@ -1443,11 +1446,11 @@ const stars = (() => {
   await DB.init();
   try{ lib = await DB.all(); }catch(e){ lib = []; }
   // v2 del analizador de nombres: reagrupa lo que no se haya editado a mano
-  if(store.get('v:parser')!=='4'){
+  if(store.get('v:parser')!=='5'){
     for(const m of lib){ if(m.manual) continue;
-      const p = parseName(m.name, m.folder||''); m.title = p.title || ''; if(p.lead && m.folder){ m.title = p.series; p.series = m.folder; } m.series = p.series; m.issue = p.issue; m.era = eraGuess(p.series);
+      const p = parseName(m.name, m.folder||''); m.title = p.title || ''; if(p.lead && m.folder){ m.title = p.series; p.series = noSWx(m.folder); } m.series = p.series; m.issue = p.issue; m.era = eraGuess(p.series);
       try{ await DB.put(m); }catch(e){} }
-    store.set('v:parser','4');
+    store.set('v:parser','5');
   }
   render();
 })();

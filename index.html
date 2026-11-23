@@ -70,7 +70,7 @@
   .tact .btn{padding:6px 12px;font-size:12.5px;text-decoration:none}
   .tact .bar{width:120px}
   .tact small{color:var(--mute);font-size:11.5px}
-  .tag.miss{color:#ff8a80;border-color:#5a2a26}
+  .tag.lack{color:#ff8a80;border-color:#5a2a26}
   .tc{position:relative}
   .miss{flex-basis:100%;color:#ff8a80;font-size:12.5px;border-top:1px dashed #5a2a26;padding-top:8px}
   .eps{flex-basis:100%;border-top:1px solid var(--line);padding-top:10px;display:grid;gap:10px}
@@ -853,7 +853,7 @@ function renderTimeline(filter){
     } else act = `<div class="tact"><a class="btn pri" href="${disney(e)}" target="_blank" rel="noopener">▶ Ver en Disney+</a><button class="btn ${s.done?'on':''}" data-seen="${e.id}">${s.done?'✓ Visto':'Marcar como visto'}</button></div>`;
     return `<div class="ti" style="--ec:${ec}"><div class="ty">${fmtY(e)}</div><div class="td"></div>
       <div class="tc ${s.done?'done':''}"><span class="tk">${TLK[e.k]}</span><div class="tb"><div class="tn">${esc(e.t)}</div>${e.n?`<div class="tnote">${esc(e.n)}</div>`:''}
-      <div class="tags"><span class="tag ${e.c==='C'?'can':''}">${e.c==='C'?'Canon':'Legends'}</span>${e.ess?'<span class="tag ess">Esencial</span>':''}${e.rec?'<span class="tag ess">Recomendado</span>':''}${s.owned?'<span class="tag own">En tu biblioteca</span>':''}${s.owned===false?'<span class="tag miss">Falta</span>':''}</div></div>${act}${panel}</div></div>`;
+      <div class="tags"><span class="tag ${e.c==='C'?'can':''}">${e.c==='C'?'Canon':'Legends'}</span>${e.ess?'<span class="tag ess">Esencial</span>':''}${e.rec?'<span class="tag ess">Recomendado</span>':''}${s.owned?'<span class="tag own">En tu biblioteca</span>':''}${s.owned===false?'<span class="tag lack">Falta</span>':''}</div></div>${act}${panel}</div></div>`;
   }).join('') + `</div>`;
   if(match.left.length && (f==='all'||f==='comic'||f==='mine'||f==='miss')){
     h += `<section><h2><span class="dot"></span>Tus series que no están en la cronología <small>${match.left.length}</small></h2><div class="chips" style="flex-wrap:wrap;overflow:visible">${match.left.map(s=>`<button class="chip" data-tlser="${esc(s.name)}">${esc(s.name)}</button>`).join('')}</div></section>`;

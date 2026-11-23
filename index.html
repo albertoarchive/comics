@@ -1063,6 +1063,10 @@ function tlMatch(cat){
   });
   return {out, left: ser.filter(s=>!claimed.has(s.key))};
 }
+function curSeries(){
+  const s = groupSeries(lib).find(x=>x.key===skey(view.series)); if(!s || !view.vol) return s;
+  const its = s.items.filter(m=>volOf(m)===view.vol); return its.length ? {...s, name:view.vol, items:its} : s;
+}
 function tlStats(e, match, seen){
   if(e.eps){ const tot = e.eps.length; let n=0; e.eps.forEach((x,i)=>{ if(seen[e.id+'|'+i]) n++; }); return {owned:null, tot, n, done:n===tot, p:Math.round(n/tot*100)}; }
   if(e.k!=='comic') return {owned:null, done:!!seen[e.id], p:seen[e.id]?100:0};
@@ -1071,7 +1075,7 @@ function tlStats(e, match, seen){
   const items = hit.flatMap(s=>s.items), rd = items.filter(m=>m.read).length;
   const nums = [...new Set(items.map(m=>m.issue).filter(x=>x!=null))].sort((a,b)=>a-b), gaps = [];
   if(nums.length>1 && nums[nums.length-1]-nums[0] < 400) for(let k=nums[0]; k<=nums[nums.length-1]; k++) if(!nums.includes(k)) gaps.push(k);
-  return {owned:true, n:items.length, rd, done:rd===items.length, p:Math.round(rd/items.length*100), name:hit[0].name, gaps};
+  return {owned:true, n:items.length, rd, done:rd===items.length, p:Math.round(rd/items.length*100), name:hit[0].name, gaps, vol:/^v:/.test(hit[0].key||'')?hit[0].key.slice(2):''};
 }
 const TLEN = {"dawn": "Dawn of the Jedi", "toj": "Tales of the Jedi", "kotor": "Knights of the Old Republic", "dark": "Star Wars: Jedi – The Dark Side", "e1": "Star Wars: Episode I The Phantom Menace", "inm": "Star Wars: Republic", "e2": "Star Wars: Episode II Attack of the Clones", "cwS": "Star Wars: The Clone Wars (TV series)", "cwC": "Star Wars: Republic", "oa": "Star Wars: Obi-Wan & Anakin", "e3": "Star Wars: Episode III Revenge of the Sith", "dt": "Star Wars: Dark Times", "bb": "Star Wars: The Bad Batch", "solo": "Solo: A Star Wars Story", "owk": "Obi-Wan Kenobi (TV series)", "reb": "Star Wars Rebels", "and": "Andor (TV series)", "r1": "Rogue One: A Star Wars Story", "e4": "Star Wars: Episode IV A New Hope", "imp": "Star Wars: Empire", "rbl": "Star Wars: Rebellion", "sw15": "Star Wars (2015)", "dv": "Darth Vader (2015)", "aph": "Doctor Aphra (2016)", "e5": "Star Wars: Episode V The Empire Strikes Back", "e6": "Star Wars: Episode VI Return of the Jedi", "she": "Star Wars: Shattered Empire", "man": "The Mandalorian (TV series)", "de": "Star Wars: Dark Empire", "ahs": "Ahsoka (TV series)", "ce": "Star Wars: Crimson Empire", "ja": "Star Wars: Jedi Academy: Leviathan", "inv": "Star Wars: Invasion", "e7": "Star Wars: Episode VII The Force Awakens", "e8": "Star Wars: Episode VIII The Last Jedi", "e9": "Star Wars: Episode IX The Rise of Skywalker", "leg": "Star Wars: Legacy (2006)"};
 const wiki = (e) => 'https://starwars.fandom.com/wiki/Special:Search?query=' + encodeURIComponent(TLEN[e.id] || ((e.k==='comic'?'Star Wars ':'')+String(e.t).replace(/^Star Wars:? /,'')).trim());
@@ -1115,7 +1119,7 @@ function renderTimeline(filter){
     let act = '';
     let panel = '';
     if(e.k==='comic'){
-      act = s.owned ? `<div class="tact"><small>${s.rd}/${s.n} leídos</small><div class="bar" style="--ec:${ec}"><b style="width:${s.p}%"></b></div><button class="btn" data-tlser="${esc(s.name)}">Abrir serie</button>${s.rd>0?`<button class="btn" data-tlun="${e.id}">↺ No leída</button>`:''}${e.auto?`<button class="btn" data-tly="${esc(e.key)}" data-tlyn="${esc(e.t)}" data-tlc="${e.c}">📅 Fecha y tipo</button>`:''}</div>`
+      act = s.owned ? `<div class="tact"><small>${s.rd}/${s.n} leídos</small><div class="bar" style="--ec:${ec}"><b style="width:${s.p}%"></b></div><button class="btn" data-tlser="${esc(s.name)}" data-tlvol="${esc(s.vol||'')}">Abrir serie</button>${s.rd>0?`<button class="btn" data-tlun="${e.id}">↺ No leída</button>`:''}${e.auto?`<button class="btn" data-tly="${esc(e.key)}" data-tlyn="${esc(e.t)}" data-tlc="${e.c}">📅 Fecha y tipo</button>`:''}</div>`
                     : `<div class="tact"><small>Falta: aún no la has subido</small></div>`;
       if(!e.auto) act = act.replace(/<\/div>$/, `<button class="btn" data-tll="${esc(e.t)}">📚 ${e.vol?'Cambiar volumen':'Está en un volumen'}</button></div>`);
       if(s.owned && s.gaps.length) panel = `<div class="miss">Posibles números que faltan: ${s.gaps.slice(0,14).map(x=>'#'+x).join(', ')}${s.gaps.length>14?'…':''}</div>`;
@@ -1168,7 +1172,7 @@ function render(){
         fields:[{id:'s',label:'Volumen / serie',type:'select',value:ml[t]||'',options:[['','— Ninguno (quitar vínculo) —'],...sers.map(s=>[s.key,s.name])]}], actions:[{id:'cancel',label:'Cancelar'},{id:'save',label:'Guardar',cls:'pri'}]});
       if(!r || r.action!=='save') return;
       if(r.vals.s) ml[t]=r.vals.s; else delete ml[t]; store.set('v:tll', JSON.stringify(ml)); render(); });
-    main.querySelectorAll('[data-tlser]').forEach(el=>el.onclick = () => { view = {name:'series', series:el.dataset.tlser, desc:false, era:'all'}; render(); window.scrollTo(0,0); });
+    main.querySelectorAll('[data-tlser]').forEach(el=>el.onclick = () => { view = {name:'series', series:el.dataset.tlser, vol:el.dataset.tlvol||'', desc:false, era:'all'}; render(); window.scrollTo(0,0); });
     return;
   }
   let list = lib;
@@ -1189,12 +1193,12 @@ function render(){
   }
 
   if(view.name==='series'){
-    const s = groupSeries(lib).find(x=>x.key===skey(view.series));
+    const s = curSeries();
     if(!s){ view = {name:'home', era:'all'}; return render(); }
     let items = s.items.slice(); if(view.desc) items.reverse();
     const cont = nextToRead(s.items);
     const done = s.items.filter(m=>m.read).length;
-    const tot = seriesTotal(s), gaps = gapList(s.items, tot&&tot.n), gset = new Set(gaps);
+    const ivv = view.vol && ISS.get(view.vol), tot = ivv ? {n:Math.max(...ivv.nums), src:'catálogo'} : seriesTotal(s), gaps = gapList(s.items, tot&&tot.n, ivv?ivv.nums:null), gset = new Set(gaps);
     let seq = []; { const asc = s.items.slice(); let prev = null;
       const first = asc.find(m=>m.issue!=null); if(first) for(let k=1;k<first.issue;k++) if(gset.has(k)) seq.push({gap:k});
       asc.forEach(m=>{ if(m.issue!=null){ if(prev!=null) for(let k=prev+1;k<m.issue;k++) if(gset.has(k)) seq.push({gap:k}); prev = Math.max(prev??m.issue, m.issue); } seq.push(m); });
@@ -1263,14 +1267,14 @@ function render(){
     $('selDel').onclick = () => { if(view.sel.size>=1) deleteSeries([...view.sel]); };
   } else bar.style.display='none';
   const back = $('back'); if(back) back.onclick = () => { view={name:'home', era:view.era}; render(); };
-  const gr = $('goRead'); if(gr) gr.onclick = () => { const s = groupSeries(lib).find(x=>x.key===skey(view.series)); openComic(nextToRead(s.items).id); };
+  const gr = $('goRead'); if(gr) gr.onclick = () => { const s = curSeries(); openComic(nextToRead(s.items).id); };
   const gt = $('grpToggle'); if(gt) gt.onclick = () => { store.set('v:group', isGroup()?'0':'1'); render(); };
   const sd = $('sortDir'); if(sd) sd.onclick = () => { view.desc = !view.desc; render(); };
   const rs = $('renSeries'); if(rs) rs.onclick = renameSeries;
   const setReadAll = async (items, val) => { for(const m of items){ m.read = val; m.pos = val ? Math.max(0,m.pages-1) : 0; try{ await DB.put(m); }catch(e){} } render(); };
-  const su = $('serUnread'); if(su) su.onclick = async () => { const s = groupSeries(lib).find(x=>x.key===skey(view.series)); const r = await modal({title:'¿Marcar toda la serie como no leída?', text:'Se pone «'+s.name+'» a cero ('+s.items.length+' números).', actions:[{id:'cancel',label:'Cancelar'},{id:'ok',label:'Marcar no leída',cls:'pri'}]}); if(r&&r.action==='ok') setReadAll(s.items,false); };
-  const sr = $('serRead'); if(sr) sr.onclick = () => { const s = groupSeries(lib).find(x=>x.key===skey(view.series)); setReadAll(s.items,true); };
-  const sp = $('serPh'); if(sp) sp.onclick = async () => { const s = groupSeries(lib).find(x=>x.key===skey(view.series));
+  const su = $('serUnread'); if(su) su.onclick = async () => { const s = curSeries(); const r = await modal({title:'¿Marcar toda la serie como no leída?', text:'Se pone «'+s.name+'» a cero ('+s.items.length+' números).', actions:[{id:'cancel',label:'Cancelar'},{id:'ok',label:'Marcar no leída',cls:'pri'}]}); if(r&&r.action==='ok') setReadAll(s.items,false); };
+  const sr = $('serRead'); if(sr) sr.onclick = () => { const s = curSeries(); setReadAll(s.items,true); };
+  const sp = $('serPh'); if(sp) sp.onclick = async () => { const s = curSeries();
     const r = await modal({title:'Asignar fase en «'+s.name+'»', text:'Pon la fase a un rango de números. Ej.: del 1 al 10 → Fase II. Dentro de cada fase, los números van de nuevo desde el 1.',
       fields:[{id:'a',label:'Desde el número',type:'number',value:''},{id:'b',label:'Hasta el número (vacío = solo ese)',type:'number',value:''},{id:'p',label:'Fase',type:'select',value:'1',options:[['',' Automática (quitar)'],['0','Sin fase'],['1','Fase I'],['2','Fase II'],['3','Fase III']]}],
       actions:[{id:'cancel',label:'Cancelar'},{id:'all',label:'A toda la serie'},{id:'save',label:'Aplicar',cls:'pri'}]});
@@ -1279,7 +1283,7 @@ function render(){
     const its = r.action==='all' ? s.items : s.items.filter(m=>m.issue!=null && !isNaN(a) && m.issue>=a && m.issue<=b2);
     for(const m of its){ if(r.vals.p==='') delete m.phase; else m.phase=parseInt(r.vals.p,10); m.manual = true; await DB.put(m); }
     status(its.length+' número'+(its.length!==1?'s':'')+' actualizado'+(its.length!==1?'s':'')); setTimeout(()=>status(''),2500); render(); };
-  const st = $('serTot'); if(st) st.onclick = async () => { const s = groupSeries(lib).find(x=>x.key===skey(view.series)); let o={}; try{ o=JSON.parse(store.get('v:stot')||'{}'); }catch(e){}
+  const st = $('serTot'); if(st) st.onclick = async () => { const s = curSeries(); let o={}; try{ o=JSON.parse(store.get('v:stot')||'{}'); }catch(e){}
     const secM = new Map(); s.items.forEach(m=>{ const o=secOf(m); secM.set(o.k,o); }); const phs = [...secM.keys()], multi = phs.length>1, t = seriesTotal(s);
     const fields = multi ? phs.map(ph=>({id:'n'+ph,label:'Total de números · '+secM.get(ph).label,type:'number',value:o[s.key+'|'+ph]||''})) : [{id:'n',label:'Total de números',type:'number',value:o[s.key]||(t?t.n:'')}];
     const r = await modal({title:'Total de números de «'+s.name+'»', text:'Así la web te marca también los que faltan al final (y los del principio, si empieza en el #1). Vacío = usar el catálogo (solo en series sin fases).', fields, actions:[{id:'cancel',label:'Cancelar'},{id:'save',label:'Guardar',cls:'pri'}]});
@@ -1287,7 +1291,7 @@ function render(){
     if(multi) phs.forEach(ph=>{ const n=parseInt(r.vals['n'+ph],10); if(n>0) o[s.key+'|'+ph]=n; else delete o[s.key+'|'+ph]; });
     else { const n=parseInt(r.vals.n,10); if(n>0) o[s.key]=n; else delete o[s.key]; }
     store.set('v:stot',JSON.stringify(o)); render(); };
-  const sc = $('serCover'); if(sc) sc.onclick = () => seriesCoverDialog(groupSeries(lib).find(x=>x.key===skey(view.series)));
+  const sc = $('serCover'); if(sc) sc.onclick = () => seriesCoverDialog(curSeries());
   main.querySelectorAll('[data-gadd]').forEach(inp=>inp.onchange = e => { importFiles(e.target.files,{series:view.series,title:inp.dataset.gadd}); e.target.value=''; });
   const fts = $('fToSeries'); if(fts) fts.onchange = e => { importFiles(e.target.files,{series:view.series}); e.target.value=''; };
   const ds = $('delSeries'); if(ds) ds.onclick = () => deleteSeries([skey(view.series)]);

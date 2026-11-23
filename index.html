@@ -184,6 +184,7 @@
     <nav class="tabs"><button class="tab on" data-v="home">Biblioteca</button><button class="tab" data-v="tl">Cronología</button></nav>
     <div class="search"><input id="q" type="search" placeholder="Buscar serie, personaje o número…" autocomplete="off"></div>
     <label class="btn pri">＋ <span class="lbl">Añadir</span><input id="fFiles" type="file" multiple accept=".cbz,.cbr,.zip,.rar"></label>
+    <button class="btn" id="bLink" title="Lee los cómics desde una carpeta de Drive, Dropbox u OneDrive sin copiarlos al navegador (Chrome/Edge en ordenador)">🔗 <span class="lbl">Enlazar</span></button>
     <label class="btn" title="Importa una carpeta entera: cada subcarpeta será una serie">📁 <span class="lbl">Carpeta</span><input id="fDir" type="file" webkitdirectory multiple></label>
   </header>
   <main id="main"></main>
@@ -227,12 +228,21 @@ const collator = new Intl.Collator('es',{numeric:true,sensitivity:'base'});
 const mem = { meta:new Map(), files:new Map() };
 let idb = null, persistent = false;
 const rq = r => new Promise((res,rej)=>{ r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); });
+async function ensureAccess(h){
+  const ok = async x => !x.queryPermission || (await x.queryPermission({mode:'read'}))==='granted';
+  if(await ok(h)) return;
+  const root = await DB.kvGet('root');
+  if(root && root.requestPermission) await root.requestPermission({mode:'read'});
+  if(await ok(h)) return;
+  if(h.requestPermission && (await h.requestPermission({mode:'read'}))==='granted') return;
+  throw new Error('sin permiso para leer la carpeta enlazada (pulsa «Sincronizar» y acepta)');
+}
 const DB = {
   async init(){
     try{
       idb = await new Promise((res,rej)=>{
-        const o = indexedDB.open('vinetas',1);
-        o.onupgradeneeded = () => { o.result.createObjectStore('meta',{keyPath:'id'}); o.result.createObjectStore('files',{keyPath:'id'}); };
+        const o = indexedDB.open('vinetas',2);
+        o.onupgradeneeded = () => { const d=o.result; ['meta','files','kv'].forEach(n=>{ if(!d.objectStoreNames.contains(n)) d.createObjectStore(n,{keyPath:'id'}); }); };
         o.onsuccess = () => res(o.result); o.onerror = () => rej(o.error); o.onblocked = () => rej(new Error('blocked'));
       });
       // prueba real de escritura
@@ -244,8 +254,15 @@ const DB = {
   },
   async all(){ return persistent ? await rq(idb.transaction('meta').objectStore('meta').getAll()) : [...mem.meta.values()]; },
   async put(m){ if(persistent) await rq(idb.transaction('meta','readwrite').objectStore('meta').put(m)); else mem.meta.set(m.id,m); },
-  async putFile(id,blob){ if(persistent) await rq(idb.transaction('files','readwrite').objectStore('files').put({id,blob})); else mem.files.set(id,blob); },
-  async getFile(id){ if(persistent){ const r = await rq(idb.transaction('files').objectStore('files').get(id)); return r && r.blob; } return mem.files.get(id); },
+  async putFile(id,blob){ const rec = (typeof FileSystemFileHandle!=='undefined' && blob instanceof FileSystemFileHandle) ? {id,handle:blob} : {id,blob}; if(persistent) await rq(idb.transaction('files','readwrite').objectStore('files').put(rec)); else mem.files.set(id,blob); },
+  async kvGet(k){ if(!persistent) return null; const r = await rq(idb.transaction('kv').objectStore('kv').get(k)); return r && r.v; },
+  async kvSet(k,v){ if(persistent) await rq(idb.transaction('kv','readwrite').objectStore('kv').put({id:k,v})); },
+  async getFile(id){
+    if(persistent){
+      const r = await rq(idb.transaction('files').objectStore('files').get(id)); if(!r) return null;
+      if(r.handle){ await ensureAccess(r.handle); return await r.handle.getFile(); }
+      return r.blob;
+    } return mem.files.get(id); },
   async del(id){
     if(persistent){ await rq(idb.transaction('meta','readwrite').objectStore('meta').delete(id)); await rq(idb.transaction('files','readwrite').objectStore('files').delete(id)); }
     else { mem.meta.delete(id); mem.files.delete(id); }
@@ -643,6 +660,40 @@ function targetFor(p, target, forcedTitle){
   return { series, issue:p.issue, title, era: g ? eraOf(g.items[0]) : eraGuess(series) };
 }
 
+/* =====================================================
+   CARPETA ENLAZADA (Drive / Dropbox / OneDrive…)
+   Los cómics se leen desde tu carpeta; no se copian al navegador.
+   ===================================================== */
+async function walkDir(dir, parent, out){
+  for await (const [name, h] of dir.entries()){
+    if(h.kind==='directory'){ if(!name.startsWith('.')) await walkDir(h, name, out); }
+    else if(/\.(cbz|cbr|zip|rar)$/i.test(name)) out.push({h, folder:parent});
+  }
+}
+async function syncLinked(dir){
+  status('Buscando cómics en la carpeta…');
+  const found = []; await walkDir(dir, '', found);
+  const files = [];
+  for(const x of found){ try{ const f = await x.h.getFile(); f._h = x.h; f._folder = x.folder; files.push(f); }catch(e){} }
+  await DB.kvSet('root', dir);
+  if(!files.length){ status('No he encontrado .cbz ni .cbr en esa carpeta.'); setTimeout(()=>status(''),4000); return; }
+  await importFiles(files);
+}
+async function linkFolder(){
+  if(!window.showDirectoryPicker){ status('Este navegador no permite enlazar carpetas. Usa Chrome o Edge en el ordenador.'); setTimeout(()=>status(''),5000); return; }
+  let root = null; try{ root = await DB.kvGet('root'); }catch(e){}
+  try{
+    if(root){
+      const r = await modal({title:'Carpeta enlazada', text:'Carpeta: «'+root.name+'». Sincronizar añade los cómics nuevos que haya puesto ahí (Drive, Dropbox…).', fields:[],
+        actions:[{id:'cancel',label:'Cancelar'},{id:'other',label:'Elegir otra carpeta'},{id:'sync',label:'Sincronizar',cls:'pri'}]});
+      if(!r || r.action==='cancel') return;
+      if(r.action==='sync'){ if(root.requestPermission && (await root.requestPermission({mode:'read'}))!=='granted') throw new Error('permiso denegado'); return await syncLinked(root); }
+    }
+    const dir = await window.showDirectoryPicker({mode:'read'});
+    await syncLinked(dir);
+  }catch(e){ if(e && e.name==='AbortError') return; status('No se pudo enlazar: '+(e.message||e)); setTimeout(()=>status(''),5000); }
+}
+
 async function importFiles(fileList, opts={}){
   const files = [...fileList].filter(f => /\.(cbz|cbr|zip|rar)$/i.test(f.name));
   if(!files.length){ status('No he visto ningún .cbz ni .cbr en lo que has soltado.'); setTimeout(()=>status(''),3500); return; }
@@ -661,7 +712,7 @@ async function importFiles(fileList, opts={}){
       const entries = await listPages(f);
       if(!entries.length) throw new Error('no tiene imágenes');
       const parts = (f.webkitRelativePath||'').split('/');
-      const folder = parts.length>1 ? parts[parts.length-2] : '';
+      const folder = f._folder!=null ? f._folder : (parts.length>1 ? parts[parts.length-2] : '');
       const p = parseName(f.name, folder);
       let {series,issue} = p, title = p.title || '';
       if(p.lead && folder){ title = series; series = folder; }
@@ -670,7 +721,8 @@ async function importFiles(fileList, opts={}){
       let era = eraGuess(series), manual = false;
       if(opts.series){ const t = targetFor(p, opts.series, opts.title); series=t.series; issue=t.issue; title=t.title; era=t.era; manual=true; }
       const meta = { id, name:f.name, folder, size:f.size, series, issue, title, era, manual, pages:entries.length, pos:0, read:false, added:Date.now(), opened:0, cover };
-      await DB.putFile(id, f);
+      meta.link = !!f._h;
+      await DB.putFile(id, f._h || f);
       await DB.put(meta);
       lib.push(meta); known.add(f.name+':'+f.size); ok++;
     }catch(err){ fails.push(f.name+' — '+(err.message||err)); }
@@ -798,7 +850,7 @@ const TL = [
 ].sort((a,b)=>a.y-b.y);
 const TLK = {film:'🎬', show:'📺', comic:'📖'};
 const disney = e => 'https://www.disneyplus.com/search?q=' + encodeURIComponent(e.d || e.t.replace(/^Episodio [IVX]+ · /,'').replace(/\s*\(.*\)/,'').replace(/: Una historia de Star Wars/,''));
-const fmtY = e => (e.ap?'≈ ':'') + (e.y<0 ? (Math.abs(e.y)>=1?Math.round(-e.y):'0')+' a.Y.' : e.y===0 ? 'Yavin' : Math.round(e.y)+' d.Y.');
+const fmtY = e => e.y>=9999 ? 'Sin fecha' : (e.ap?'≈ ':'') + (e.y<0 ? (Math.abs(e.y)>=1?Math.round(-e.y):'0')+' a.Y.' : e.y===0 ? 'Yavin' : Math.round(e.y)+' d.Y.');
 const seenGet = () => { try{ return JSON.parse(store.get('v:seen')||'{}'); }catch(e){ return {}; } };
 
 function tlMatch(){
@@ -823,7 +875,13 @@ function tlStats(e, match, seen){
 function renderTimeline(filter){
   const seen = seenGet(), match = tlMatch();
   const f = view.f || 'ruta';
-  const rows = TL.map(e=>({e, s:tlStats(e,match,seen)}));
+  // series tuyas que no encajan en ninguna entrada: se colocan por su era (y puedes ponerles fecha)
+  let yo = {}; try{ yo = JSON.parse(store.get('v:tly')||'{}'); }catch(e){}
+  const EY = {altarep:-200, republica:-30, clon:-21, imperio:-10, rebelion:2, nueva:8, primera:34, legends:-1000, sin:9999};
+  const auto = match.left.map(s=>{ const e0 = eraOf(s.items[0]), o = yo[s.key]; match.out['a:'+s.key] = [s];
+    return {id:'a:'+s.key, key:s.key, k:'comic', c:'', t:s.name, y:o!=null?o:EY[e0], ap:o==null, era:e0, auto:1}; });
+  const ALL = [...TL, ...auto].sort((a,b)=>a.y-b.y);
+  const rows = ALL.map(e=>({e, s:tlStats(e,match,seen)}));
   const inRoute = r => r.e.ess || (r.e.rec && r.s.owned!==false) || (r.e.k==='comic' && r.s.owned);
   const tests = {
     all: r=>true, ruta: inRoute, film: r=>r.e.k==='film', show: r=>r.e.k==='show',
@@ -834,7 +892,7 @@ function renderTimeline(filter){
   const q2 = filter||'';
   const shown = rows.filter(r=>tests[f](r) && (!q2 || r.e.t.toLowerCase().includes(q2)));
   let h = `<div class="tlsum"><b>Mi ruta: ${routeDone} de ${route.length} completados</b><div class="bar" style="--ec:var(--acc2)"><b style="width:${route.length?Math.round(routeDone/route.length*100):0}%"></b></div></div>`;
-  h += `<p class="tlkey">La ruta junta lo esencial (películas y series canon) con los cómics recomendados por los foros que tienes en tu biblioteca. Los botones de Disney+ abren su buscador con el título (necesitas tu cuenta). Año: <b>a.Y.</b> antes de la batalla de Yavin, <b>d.Y.</b> después; «≈» es aproximado. <b>Legends</b> no es canon: algunas historias contradicen a las series y películas.</p>`;
+  h += `<p class="tlkey">La ruta junta lo esencial (películas y series canon) con los cómics recomendados por los foros que tienes en tu biblioteca. Tus series que no tengo catalogadas se colocan según su era; con «📅 Fecha» las pones en su año exacto. Los botones de Disney+ abren su buscador con el título (necesitas tu cuenta). Año: <b>a.Y.</b> antes de la batalla de Yavin, <b>d.Y.</b> después; «≈» es aproximado. <b>Legends</b> no es canon: algunas historias contradicen a las series y películas.</p>`;
   h += `<div class="chips">` + Object.keys(labels).map(k=>`<button class="chip ${f===k?'on':''}" data-tlf="${k}">${labels[k]} <em>${rows.filter(tests[k]).length}</em></button>`).join('') + `</div>`;
   if(!shown.length) h += `<p style="color:var(--mute)">Nada que mostrar con este filtro.</p>`;
   h += `<div class="tl">` + shown.map(({e,s})=>{
@@ -842,7 +900,7 @@ function renderTimeline(filter){
     let act = '';
     let panel = '';
     if(e.k==='comic'){
-      act = s.owned ? `<div class="tact"><small>${s.rd}/${s.n} leídos</small><div class="bar" style="--ec:${ec}"><b style="width:${s.p}%"></b></div><button class="btn" data-tlser="${esc(s.name)}">Abrir serie</button></div>`
+      act = s.owned ? `<div class="tact"><small>${s.rd}/${s.n} leídos</small><div class="bar" style="--ec:${ec}"><b style="width:${s.p}%"></b></div><button class="btn" data-tlser="${esc(s.name)}">Abrir serie</button>${e.auto?`<button class="btn" data-tly="${esc(e.key)}" data-tlyn="${esc(e.t)}">📅 Fecha</button>`:''}</div>`
                     : `<div class="tact"><small>Falta: aún no la has subido</small></div>`;
       if(s.owned && s.gaps.length) panel = `<div class="miss">Posibles números que faltan: ${s.gaps.slice(0,14).map(x=>'#'+x).join(', ')}${s.gaps.length>14?'…':''}</div>`;
     } else if(e.eps){
@@ -853,11 +911,8 @@ function renderTimeline(filter){
     } else act = `<div class="tact"><a class="btn pri" href="${disney(e)}" target="_blank" rel="noopener">▶ Ver en Disney+</a><button class="btn ${s.done?'on':''}" data-seen="${e.id}">${s.done?'✓ Visto':'Marcar como visto'}</button></div>`;
     return `<div class="ti" style="--ec:${ec}"><div class="ty">${fmtY(e)}</div><div class="td"></div>
       <div class="tc ${s.done?'done':''}"><span class="tk">${TLK[e.k]}</span><div class="tb"><div class="tn">${esc(e.t)}</div>${e.n?`<div class="tnote">${esc(e.n)}</div>`:''}
-      <div class="tags"><span class="tag ${e.c==='C'?'can':''}">${e.c==='C'?'Canon':'Legends'}</span>${e.ess?'<span class="tag ess">Esencial</span>':''}${e.rec?'<span class="tag ess">Recomendado</span>':''}${s.owned?'<span class="tag own">En tu biblioteca</span>':''}${s.owned===false?'<span class="tag lack">Falta</span>':''}</div></div>${act}${panel}</div></div>`;
+      <div class="tags">${e.c?`<span class="tag ${e.c==='C'?'can':''}">${e.c==='C'?'Canon':'Legends'}</span>`:'<span class="tag">Tu serie</span>'}${e.ess?'<span class="tag ess">Esencial</span>':''}${e.rec?'<span class="tag ess">Recomendado</span>':''}${s.owned?'<span class="tag own">En tu biblioteca</span>':''}${s.owned===false?'<span class="tag lack">Falta</span>':''}</div></div>${act}${panel}</div></div>`;
   }).join('') + `</div>`;
-  if(match.left.length && (f==='all'||f==='comic'||f==='mine'||f==='miss')){
-    h += `<section><h2><span class="dot"></span>Tus series que no están en la cronología <small>${match.left.length}</small></h2><div class="chips" style="flex-wrap:wrap;overflow:visible">${match.left.map(s=>`<button class="chip" data-tlser="${esc(s.name)}">${esc(s.name)}</button>`).join('')}</div></section>`;
-  }
   return h;
 }
 
@@ -873,6 +928,14 @@ function render(){
     main.querySelectorAll('[data-eps]').forEach(el=>el.onclick = () => { const o = view.open||(view.open=[]); const id=el.dataset.eps, i=o.indexOf(id); i<0?o.push(id):o.splice(i,1); render(); });
     main.querySelectorAll('[data-ep]').forEach(el=>el.onclick = () => { const sn=seenGet(), k=el.dataset.ep; sn[k]?delete sn[k]:sn[k]=1; store.set('v:seen',JSON.stringify(sn)); render(); });
     main.querySelectorAll('[data-ssn]').forEach(el=>el.onclick = () => { const [id,i,c]=el.dataset.ssn.split('|'), sn=seenGet(); const ks=[...Array(+c)].map((_,k)=>id+'|'+i+'|'+(k+1)); const all=ks.every(k=>sn[k]); ks.forEach(k=>all?delete sn[k]:sn[k]=1); store.set('v:seen',JSON.stringify(sn)); render(); });
+    main.querySelectorAll('[data-tly]').forEach(el=>el.onclick = async () => {
+      let yo={}; try{ yo=JSON.parse(store.get('v:tly')||'{}'); }catch(e){}
+      const k=el.dataset.tly, cur = yo[k];
+      const r = await modal({title:'Colocar en la cronología: '+el.dataset.tlyn, text:'Año respecto a la batalla de Yavin: negativo = antes (ej. -22 = Guerras Clon), positivo = después. Vacío = según su era.',
+        fields:[{id:'y',label:'Año',value:cur!=null?String(cur):''}], actions:[{id:'cancel',label:'Cancelar'},{id:'save',label:'Guardar',cls:'pri'}]});
+      if(!r || r.action!=='save') return;
+      const v = parseFloat(String(r.vals.y).replace(',','.')); if(isNaN(v)) delete yo[k]; else yo[k]=v;
+      store.set('v:tly', JSON.stringify(yo)); render(); });
     main.querySelectorAll('[data-tlser]').forEach(el=>el.onclick = () => { view = {name:'series', series:el.dataset.tlser, desc:false, era:'all'}; render(); window.scrollTo(0,0); });
     return;
   }
@@ -1210,6 +1273,7 @@ $('stage').addEventListener('touchend',e=>{
 $('fFiles').onchange = e => { importFiles(e.target.files); e.target.value=''; };
 $('fDir').onchange = e => { importFiles(e.target.files); e.target.value=''; };
 document.querySelectorAll('.tab').forEach(t=>t.onclick = () => { view = t.dataset.v==='tl' ? {name:'tl', f:(view.f||'ruta')} : {name:'home', era:'all'}; q.text=''; $('q').value=''; render(); window.scrollTo(0,0); });
+$('bLink').onclick = linkFolder; if(!window.showDirectoryPicker) $('bLink').style.display='none';
 $('logo').onclick = () => { view={name:'home', era:'all'}; q.text=''; $('q').value=''; render(); window.scrollTo(0,0); };
 $('q').oninput = e => { q.text = e.target.value; if(view.name==='series') view={name:'home', era:view.era}; render(); };
 let dragN = 0;

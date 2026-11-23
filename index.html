@@ -1081,11 +1081,12 @@ function render(){
       asc.forEach(m=>{ if(m.issue!=null){ if(prev!=null) for(let k=prev+1;k<m.issue;k++) if(gset.has(k)) seq.push({gap:k}); prev = Math.max(prev??m.issue, m.issue); } seq.push(m); });
       if(view.desc) seq.reverse(); }
     html += `<button class="back" id="back">← Todas las series</button>
-      <div class="shead"><div class="cover ${s.items[0].cover?'':'ph'}" ${coverStyle(s.items[0])}>${s.items[0].cover?'':phLetter(s.items[0])}</div>
+      <div class="shead"><div class="cover ${coverItem(s).cover?'':'ph'}" ${coverStyle(coverItem(s))}>${coverItem(s).cover?'':phLetter(coverItem(s))}</div>
       <div style="--ec:${eraCol(eraOf(s.items[0]))}"><h1>${esc(s.name)}</h1><div class="era">${esc(ERA[eraOf(s.items[0])].name)}</div><p>${s.items.length} número${s.items.length>1?'s':''} · ${done} leído${done!==1?'s':''}</p>
       <div class="row"><label class="btn" id="addToSeries">＋ Añadir cómics a esta serie<input id="fToSeries" type="file" multiple accept=".cbz,.cbr,.zip,.rar,.pdf"></label>
       <button class="btn pri" id="goRead">▶ ${cont.pos>0&&!cont.read?'Continuar':'Empezar'} ${esc(issueLabel(cont))}</button>
       <button class="btn" id="renSeries">Editar serie</button>
+      <button class="btn" id="serCover">🖼 Portada</button>
       <button class="btn danger" id="delSeries">Eliminar serie</button>
       <button class="btn ${isGroup()?'on':''}" id="grpToggle" title="Separar los números por título dentro de la serie">▤ Agrupar por título</button>
       <button class="btn ${view.desc?'on':''}" id="sortDir">${view.desc?'Más nuevo primero':'Más antiguo primero'}</button></div></div></div>
@@ -1130,6 +1131,7 @@ function render(){
   const gt = $('grpToggle'); if(gt) gt.onclick = () => { store.set('v:group', isGroup()?'0':'1'); render(); };
   const sd = $('sortDir'); if(sd) sd.onclick = () => { view.desc = !view.desc; render(); };
   const rs = $('renSeries'); if(rs) rs.onclick = renameSeries;
+  const sc = $('serCover'); if(sc) sc.onclick = () => seriesCoverDialog(groupSeries(lib).find(x=>x.key===skey(view.series)));
   main.querySelectorAll('[data-gadd]').forEach(inp=>inp.onchange = e => { importFiles(e.target.files,{series:view.series,title:inp.dataset.gadd}); e.target.value=''; });
   const fts = $('fToSeries'); if(fts) fts.onchange = e => { importFiles(e.target.files,{series:view.series}); e.target.value=''; };
   const ds = $('delSeries'); if(ds) ds.onclick = () => deleteSeries([skey(view.series)]);
@@ -1158,8 +1160,23 @@ function groupedIssues(items, fb){
 function nextToRead(items){
   return items.find(m=>m.pos>0&&!m.read) || items.find(m=>!m.read) || items[0];
 }
+function coverItem(s){ let o={}; try{ o=JSON.parse(store.get('v:scov')||'{}'); }catch(e){} return s.items.find(m=>m.id===o[s.key]) || s.items.find(m=>m.cover) || s.items[0]; }
+function pickImage(){ return new Promise(res=>{ const i=document.createElement('input'); i.type='file'; i.accept='image/*'; i.onchange=()=>res(i.files[0]||null); i.oncancel=()=>res(null); i.click(); }); }
+async function imgToCover(f){ try{ const bmp=await createImageBitmap(f); const w=360,h2=Math.round(bmp.height*w/bmp.width); const c=document.createElement('canvas'); c.width=w; c.height=h2; c.getContext('2d').drawImage(bmp,0,0,w,h2); return await new Promise(r=>c.toBlob(r,'image/jpeg',0.86)); }catch(e){ return null; } }
+async function setOwnCover(m){ const f = await pickImage(); if(!f) return false; const b = await imgToCover(f); if(!b){ alert('No he podido leer esa imagen.'); return false; } m.cover = b; m.coverManual = true; if(covers.has(m.id)){ URL.revokeObjectURL(covers.get(m.id)); covers.delete(m.id); } await DB.put(m); return true; }
+async function seriesCoverDialog(s){
+  let o={}; try{ o=JSON.parse(store.get('v:scov')||'{}'); }catch(e){}
+  const cur = coverItem(s);
+  const r = await modal({title:'Portada de «'+s.name+'»', text:'Elige qué número hace de portada de la serie, o sube tu propia imagen para ese número.',
+    fields:[{id:'c',label:'Número que hace de portada',type:'select',value:cur.id,options:s.items.map(m=>[m.id,fullLabel(m)||('#'+m.issue)])}],
+    actions:[{id:'cancel',label:'Cancelar'},{id:'img',label:'🖼 Subir imagen propia'},{id:'save',label:'Guardar',cls:'pri'}]});
+  if(!r||r.action==='cancel') return;
+  o[s.key]=r.vals.c; store.set('v:scov',JSON.stringify(o));
+  if(r.action==='img'){ const m=lib.find(x=>x.id===r.vals.c); if(m) await setOwnCover(m); }
+  render();
+}
 function seriesTile(s){
-  const first = s.items[0], read = s.items.filter(m=>m.read).length, p = Math.round(read/s.items.length*100);
+  const first = coverItem(s), read = s.items.filter(m=>m.read).length, p = Math.round(read/s.items.length*100);
   const ev = eraOf(first), ec = eraCol(ev);
   return `<div class="tile stack ${view.sel&&view.sel.has(s.key)?'sel':''}" style="--ec:${ec}" data-series="${esc(s.name)}" data-key="${esc(s.key)}"><span class="chk">✓</span><div class="cover ${first.cover?'':'ph'}" ${coverStyle(first)}>${first.cover?'':phLetter(first)}</div>
     <div class="meta"><div class="nm">${esc(s.name)}</div><div class="sub">${s.items.length} número${s.items.length>1?'s':''}${read?` · ${read} leído${read>1?'s':''}`:''}</div>
@@ -1192,12 +1209,15 @@ async function editComic(id){
     actions:[
       {id:'del',label:'Eliminar',cls:'danger',confirm:'¿Seguro? Pulsa otra vez'},
       {id:'toggle',label:m.read?'Marcar no leído':'Marcar leído'},
+      {id:'cover',label:'🖼 Cambiar portada'},
       {id:'cancel',label:'Cancelar'},
       {id:'save',label:'Guardar',cls:'pri'}]});
   if(!r || r.action==='cancel') return;
   if(r.action==='del'){
     await DB.del(id); lib = lib.filter(x=>x.id!==id);
     if(covers.has(id)){ URL.revokeObjectURL(covers.get(id)); covers.delete(id); }
+  } else if(r.action==='cover'){
+    await setOwnCover(m);
   } else if(r.action==='toggle'){
     m.read = !m.read; m.pos = m.read ? m.pages-1 : 0; await DB.put(m);
   } else if(r.action==='save'){

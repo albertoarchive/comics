@@ -1391,8 +1391,12 @@ function tile(m, showSeries, hideTitle, showPart){
 }
 
 function volOptions(m){
-  issInit(); const names = new Set();
-  ISS.forEach(g=>{ if(m.issue==null || g.nums.has(m.issue)) names.add(g.name); });
+  issInit(); const names = new Set(), st = ntok(m.series||'');
+  // todos los volúmenes de la misma serie (aunque no tengan ese número: un archivo puede estar mal numerado), y los que sí tienen el número
+  ISS.forEach(g=>{
+    const same = st.size && g.toks.size && ([...st].every(w=>g.toks.has(w)) || [...g.toks].every(w=>st.has(w)));
+    if(same || m.issue==null || g.nums.has(m.issue)) names.add(g.name);
+  });
   if(m.vol) names.add(m.vol);
   return [['','Automático'], ...[...names].sort().map(n=>[n,n])];
 }

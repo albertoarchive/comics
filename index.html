@@ -846,7 +846,15 @@ function groupSeries(list){
   g.forEach(s => s.items.sort(byIssue));
   return [...g.values()].sort((a,b)=>collator.compare(a.name,b.name));
 }
+function phaseOf(m){
+  const t = [m.name, m.title, m.series, m.folder].filter(Boolean).join(' ');
+  let x = t.match(/\b(?:phase|fase)[\s._-]*(iii|ii|i|3|2|1)\b/i);
+  if(x){ const v = x[1].toLowerCase(); return v==='iii'||v==='3' ? 3 : v==='ii'||v==='2' ? 2 : 1; }
+  if(/high republic|alta rep[uú]blica/i.test(t)){ x = t.match(/\b(202[1-6])\b/); if(x) return Math.min(3, +x[1]-2020); }
+  return 0;
+}
 function byIssue(a,b){
+  const pa = phaseOf(a), pb = phaseOf(b); if(pa!==pb) return pa-pb;
   if(a.issue!=null && b.issue!=null && a.issue!==b.issue) return a.issue-b.issue;
   if((a.issue==null)!==(b.issue==null)) return a.issue==null?1:-1;
   const t = collator.compare(a.title||'', b.title||''); if(t) return t;
@@ -855,7 +863,7 @@ function byIssue(a,b){
 const isGroup = () => store.get('v:group')!=='0';
 const pct = m => m.read ? 100 : (m.pos>0 ? Math.round((m.pos+1)/m.pages*100) : 0);
 const issueLabel = m => m.issue!=null ? '#'+m.issue : m.name.replace(/\.[^.]+$/,'');
-const fullLabel = m => issueLabel(m) + (m.title && m.issue!=null ? ' · '+m.title : '');
+const fullLabel = m => { const ph = phaseOf(m); return (ph?'F'+ph+' · ':'') + issueLabel(m) + (m.title && m.issue!=null ? ' · '+m.title : ''); };
 
 /* =====================================================
    CRONOLOGÍA (películas, series y cómics)
@@ -1154,7 +1162,7 @@ function groupedIssues(items, fb){
   const shared = [...g.entries()].filter(([k,v])=>k && v.items.length>=2);
   if(!shared.length) return fb || `<div class="grid">${items.map(m=>tile(m)).join('')}</div>`;
   // las subseries se ordenan por su número más bajo (no por nombre ni por orden de importación)
-  const minIssue = v => v.items.reduce((m,x)=>x.issue!=null && x.issue<m ? x.issue : m, Infinity);
+  const minIssue = v => v.items.reduce((m,x)=>{ const k = phaseOf(x)*1000 + (x.issue!=null?x.issue:0); return x.issue!=null && k<m ? k : m; }, Infinity);
   shared.sort((a,b)=>{ const d = minIssue(a[1])-minIssue(b[1]); if(d && isFinite(d)) return d; if(isFinite(minIssue(a[1]))!==isFinite(minIssue(b[1]))) return isFinite(minIssue(a[1]))?-1:1; return collator.compare(a[1].name,b[1].name); });
   if(view.desc) shared.reverse();
   shared.forEach(([k,v])=>v.items.sort(byIssue)); if(view.desc) shared.forEach(([k,v])=>v.items.reverse());
@@ -1197,7 +1205,7 @@ function seriesTotal(s){
 }
 function gapList(items, total){
   const nums = [...new Set(items.map(m=>m.issue).filter(x=>x!=null))].sort((a,b)=>a-b), g = [];
-  if(!nums.length) return g;
+  if(!nums.length || new Set(items.map(phaseOf).filter(Boolean)).size>1) return g;
   const lo = nums[0]>1 && nums[0]<400 ? 1 : nums[0], hi = Math.max(nums[nums.length-1], total||0);
   if(hi-lo < 400) for(let k=lo; k<=hi; k++) if(!nums.includes(k)) g.push(k);
   return g;

@@ -1120,13 +1120,21 @@ function renderTimeline(filter){
   const inRoute = r => r.e.ess || (r.e.rec && r.s.owned!==false) || (r.e.k==='comic' && r.s.owned);
   const tests = {
     all: r=>true, ruta: inRoute, film: r=>r.e.k==='film', show: r=>r.e.k==='show',
-    comic: r=>r.e.k==='comic', mine: r=>r.s.owned===true, miss: r=>r.s.owned===false, canon: r=>r.e.c==='C', leg: r=>r.e.c==='L', pending: r=>!r.s.done && inRoute(r), short: r=>!!r.e.short
+    comic: r=>r.e.k==='comic', canon: r=>r.e.c==='C', leg: r=>r.e.c==='L', short: r=>!!r.e.short
   };
+  // el estado se combina con el tipo: p. ej. Canon + Faltantes = lo canon que aún no tienes (o que tienes incompleto)
+  const stests = {
+    mine: r=>r.s.owned===true,
+    miss: r=>r.s.owned===false || !!(r.s.gaps && r.s.gaps.length),
+    pending: r=>!r.s.done && inRoute(r)
+  };
+  const slabels = {mine:'Los que tengo', miss:'Faltantes', pending:'Pendientes'};
+  const fs = view.s || null;
   const vis = r => !r.e.short || r.s.owned || f==='short';
-  const labels = {ruta:'Mi ruta', all:'Todo', film:'Películas', show:'Series', comic:'Cómics', mine:'Los que tengo', miss:'Faltantes', canon:'Canon', leg:'Legends', pending:'Pendientes', short:'Relatos sueltos'};
+  const labels = {ruta:'Mi ruta', all:'Todo', film:'Películas', show:'Series', comic:'Cómics', canon:'Canon', leg:'Legends', short:'Relatos sueltos'};
   const route = rows.filter(inRoute), routeDone = route.filter(r=>r.s.done).length;
   const q2 = filter||'';
-  const shown = rows.filter(r=>vis(r) && tests[f](r) && (!q2 || r.e.t.toLowerCase().includes(q2)));
+  const shown = rows.filter(r=>vis(r) && tests[f](r) && (!fs || stests[fs](r)) && (!q2 || r.e.t.toLowerCase().includes(q2)));
   const nx = route.find(r=>!r.s.done);
   let nb = '';
   if(nx){ const e = nx.e, s = nx.s; let act = '', sub = '';
@@ -1137,7 +1145,8 @@ function renderTimeline(filter){
   } else if(route.length) nb = `<div class="tlnext"><div class="tx"><small>¡Ruta completada!</small><h3>Has terminado todo lo de tu ruta</h3></div></div>`;
   let h = nb + `<div class="tlsum"><b>Mi ruta: ${routeDone} de ${route.length} completados</b><div class="bar" style="--ec:var(--acc2)"><b style="width:${route.length?Math.round(routeDone/route.length*100):0}%"></b></div></div>`;
   h += `<p class="tlkey">La ruta junta lo esencial (películas y series canon) con los cómics recomendados por los foros que tienes en tu biblioteca. Tus series que no tengo catalogadas se colocan según su era; con «📅 Fecha» las pones en su año exacto. Los botones de Disney+ abren su buscador con el título (necesitas tu cuenta). Año: <b>a.Y.</b> antes de la batalla de Yavin, <b>d.Y.</b> después; «≈» es aproximado. <b>Legends</b> no es canon: algunas historias contradicen a las series y películas.</p>`;
-  h += `<div class="chips">` + Object.keys(labels).map(k=>`<button class="chip ${f===k?'on':''}" data-tlf="${k}">${labels[k]} <em>${rows.filter(r=>(k==='short'||vis(r)) && tests[k](r)).length}</em></button>`).join('') + `</div>`;
+  h += `<div class="chips">` + Object.keys(labels).map(k=>`<button class="chip ${f===k?'on':''}" data-tlf="${k}">${labels[k]} <em>${rows.filter(r=>(k==='short'||vis(r)) && tests[k](r) && (!fs || stests[fs](r))).length}</em></button>`).join('') + `</div>`;
+  h += `<div class="chips">` + Object.keys(slabels).map(k=>`<button class="chip ${fs===k?'on':''}" data-tls="${k}">${slabels[k]} <em>${rows.filter(r=>vis(r) && tests[f](r) && stests[k](r)).length}</em></button>`).join('') + `</div>`;
   if(!shown.length) h += `<p style="color:var(--mute)">Nada que mostrar con este filtro.</p>`;
   h += `<div class="tl">` + shown.map(({e,s})=>{
     const ec = eraCol(e.era);
@@ -1172,6 +1181,7 @@ function render(){
     main.innerHTML = renderTimeline(filter);
     document.body.classList.remove('selmode'); $('selbar').style.display='none';
     main.querySelectorAll('[data-tlf]').forEach(el=>el.onclick = () => { view.f = el.dataset.tlf; render(); });
+    main.querySelectorAll('[data-tls]').forEach(el=>el.onclick = () => { const k = el.dataset.tls; view.s = view.s===k ? null : k; if(view.s && (view.f||'ruta')==='ruta') view.f = 'all'; render(); });
     main.querySelectorAll('[data-seen]').forEach(el=>el.onclick = () => { const sn = seenGet(); const id = el.dataset.seen; sn[id] ? delete sn[id] : sn[id]=1; store.set('v:seen', JSON.stringify(sn)); render(); });
     main.querySelectorAll('[data-eps]').forEach(el=>el.onclick = () => { const o = view.open||(view.open=[]); const id=el.dataset.eps, i=o.indexOf(id); i<0?o.push(id):o.splice(i,1); render(); });
     main.querySelectorAll('[data-ep]').forEach(el=>el.onclick = () => { const sn=seenGet(), k=el.dataset.ep; sn[k]?delete sn[k]:sn[k]=1; store.set('v:seen',JSON.stringify(sn)); render(); });

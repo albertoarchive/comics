@@ -642,7 +642,9 @@ async function extractRar(file,en){
 const noSWx = t => { const r = String(t||'').replace(/^star\s*wars\b[\s\-–—,.:_]*/i,'').trim(); return r || t; };
 function parseName(fileName, folder){
   let s = fileName.replace(/\.[^.]+$/,'').replace(/_+/g,' ');
-  s = s.replace(/\([^)]*\)|\[[^\]]*\]/g,' ').replace(/\s+/g,' ').trim();
+  s = s.replace(/\([^)]*\)|\[[^\]]*\]/g,' ');
+  s = s.replace(/(^|\s)(?:www\.)?[a-z0-9-]+\.(?:info|com|net|org|biz|cc|to|io|me|co)(?=\s|$)/ig,' ');  // marcas de webs: «GetComics.INFO», «readcomicsonline.ru»…
+  s = s.replace(/\s+/g,' ').trim();
   let issue = null, series = s, m, lead = false, title = '';
   if((m = s.match(/^#?0*(\d{1,3})$/))){ issue = parseInt(m[1],10); series = ''; }
   else if((m = s.match(/^#?0*(\d{1,3})\s*[-–—._:)]+\s*(.+)$/)) || (m = s.match(/^#?0*(\d{1,3})\s+(\D.*)$/))){
@@ -1740,11 +1742,12 @@ const stars = (() => {
   await DB.init();
   try{ lib = await DB.all(); }catch(e){ lib = []; }
   // v2 del analizador de nombres: reagrupa lo que no se haya editado a mano
-  if(store.get('v:parser')!=='5'){
-    for(const m of lib){ if(m.manual) continue;
+  if(store.get('v:parser')!=='6'){
+    for(const m of lib){
+      if(m.manual){ if(m.issue==null){ const p = parseName(m.name, m.folder||''); if(p.issue!=null){ m.issue = p.issue; try{ await DB.put(m); }catch(e){} } } continue; }
       const p = parseName(m.name, m.folder||''); m.title = p.title || ''; if(p.lead && m.folder){ m.title = p.series; p.series = noSWx(m.folder); } m.series = p.series; m.issue = p.issue; m.era = eraGuess(p.series);
       try{ await DB.put(m); }catch(e){} }
-    store.set('v:parser','5');
+    store.set('v:parser','6');
   }
   render();
 })();

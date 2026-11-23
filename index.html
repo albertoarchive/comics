@@ -947,7 +947,7 @@ function tlMatch(cat){
   const cand = cat.filter(e=>!e.m && e.k==='comic' && !out[e.id]);
   ser.filter(s=>!claimed.has(s.key)).forEach(s=>{
     const a = ntok(s.name); let best=null, bs=0;
-    cand.forEach(e=>{ [e.t, e.es].forEach(nm=>{ if(!nm) return; const sc = nsim(a, ntok(nm)); if(sc>bs){ bs=sc; best=e; } }); });
+    cand.forEach(e=>{ const cnt = parseInt(e.n)||1; [e.t, e.es].forEach(nm=>{ if(!nm) return; const sc = nsim(a, ntok(nm)) - (cnt<2?0.02:0) + Math.min(cnt,20)*0.001; if(sc>bs){ bs=sc; best=e; } }); });
     if(best && bs>=0.6){ claimed.add(s.key); (out[best.id]=out[best.id]||[]).push(s); }
   });
   return {out, left: ser.filter(s=>!claimed.has(s.key))};

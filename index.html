@@ -989,6 +989,7 @@ const TL = [
   {id:'r1',   k:'film',  c:'C', t:'Rogue One: Una historia de Star Wars', y:-0.1, era:'rebelion', ess:1},
   {id:'e4',   k:'film',  c:'C', t:'Episodio IV · Una nueva esperanza', y:0, era:'rebelion', ess:1},
   {id:'imp',x:/^Empire$/,   k:'comic', c:'L', t:'Imperio (Dark Horse)', y:0.2, ap:1, era:'imperio', m:s=>/imperio/i.test(s)&&!/oscuro|carmes|fin del imperio/i.test(s)},
+  {id:'jab',x:/^Jabba the Hutt/,   k:'comic', c:'L', t:'Jabba el Hutt (one-shots de Dark Horse, 1995–96)', y:-4, ap:1, era:'rebelion', m:s=>/jabba|lurga/i.test(s)&&!/war of the bounty|age of rebellion|palace|palacio|bounty|rebeli|churo|smugglers/i.test(s), n:'Cuatro especiales de Jabba (The Gaar Suppoon Hit, The Hunger of Princess Nampi, The Dynasty Trap y Betrayal), entre las Guerras Clon y El retorno del Jedi. Aquí también caen las ediciones en español sueltas («El protocolo de Jabba», «Lurga el Hutt»…). Es Legends.'},
   {id:'rbl',x:/^Rebellion$/,   k:'comic', c:'L', t:'Rebelión (Dark Horse)', y:0.3, ap:1, era:'rebelion', m:/rebeli[oó]n/i},
   {id:'sw15',x:/^Star Wars \(2015\)$/,  k:'comic', c:'C', t:'Star Wars (Marvel, 2015)', y:0.5, ap:1, era:'rebelion', rec:1, m:/^(star wars)?\s*(\(?2015\)?)?$/i, n:'El punto de entrada al canon de cómics que recomiendan los foros, junto a Darth Vader.'},
   {id:'dv',x:/^Darth Vader \(2015\)$/,    k:'comic', c:'C', t:'Darth Vader (2015)', y:0.6, ap:1, era:'imperio', rec:1, m:/vader/i, n:'Se lee a la vez que Star Wars (2015).'},

@@ -1089,7 +1089,23 @@ function tlMatch(cat){
         Object.keys(bk).forEach(id=>{ (out[id]=out[id]||[]).push({key:'s:'+s.key+'|'+id, name:s.name, vol:best.vol, items:bk[id]}); }); }
       else (out[best.id]=out[best.id]||[]).push(s); }
   });
-  return {out, left: ser.filter(s=>!claimed.has(s.key))};
+  const res = {out, left: ser.filter(s=>!claimed.has(s.key))};
+  return applyLinks(res, ser, cat);
+}
+/* vínculos manuales serie → entrada de la cronología (para cuando el título en español no se reconoce solo) */
+const tlLinks = () => { try{ return JSON.parse(store.get('v:tllink')||'{}'); }catch(e){ return {}; } };
+function applyLinks(res, ser, cat){
+  const links = tlLinks(), ks = Object.keys(links); if(!ks.length) return res;
+  const ids = new Set(cat.map(e=>e.id)), take = new Set();
+  const lk = ks.filter(k=>ids.has(links[k]) && ser.some(s=>s.key===k)); if(!lk.length) return res;
+  lk.forEach(k=>take.add(k));
+  const mine = new Set(); lk.forEach(k=>ser.find(s=>s.key===k).items.forEach(m=>mine.add(m.id)));
+  Object.keys(res.out).forEach(id=>{
+    res.out[id] = res.out[id].map(g=>({...g, items:g.items.filter(m=>!mine.has(m.id))})).filter(g=>g.items.length);
+    if(!res.out[id].length) delete res.out[id]; });
+  lk.forEach(k=>{ const g = ser.find(s=>s.key===k); (res.out[links[k]] = res.out[links[k]]||[]).push(g); });
+  res.left = res.left.filter(g=>!take.has(g.key));
+  return res;
 }
 function curSeries(){
   const s = groupSeries(lib).find(x=>x.key===skey(view.series)); if(!s || !view.vol) return s;
@@ -1254,6 +1270,7 @@ function render(){
       <button class="btn" id="serRead">✓ Marcar serie leída</button>
       <button class="btn" id="serPh">🏷 Asignar fase</button>
       <button class="btn" id="serTot">🔢 Total de números</button>
+      <button class="btn" id="serLink" title="Si el título en español no se reconoce, elige a mano a qué entrada de la cronología corresponde">🔗 Vincular a la cronología</button>
       <button class="btn danger" id="delSeries">Eliminar serie</button>
       <button class="btn ${isGroup()?'on':''}" id="grpToggle" title="Separar los números por título dentro de la serie">▤ Agrupar por título</button>
       <button class="btn ${view.desc?'on':''}" id="sortDir">${view.desc?'Más nuevo primero':'Más antiguo primero'}</button></div></div></div>
@@ -1325,6 +1342,15 @@ function render(){
     for(const m of its){ if(r.vals.v){ m.vol = r.vals.v; delete m.phase; } else if(r.vals.p==='') delete m.phase; else m.phase=parseInt(r.vals.p,10); m.manual = true; await DB.put(m); }
     volCache.clear();
     status(its.length+' número'+(its.length!==1?'s':'')+' actualizado'+(its.length!==1?'s':'')); setTimeout(()=>status(''),2500); render(); };
+  const sl = $('serLink'); if(sl) sl.onclick = async () => { const s = groupSeries(lib).find(x=>x.key===skey(view.series)); if(!s) return;
+    const links = tlLinks(), opts = tlCatalog().filter(e=>e.k==='comic').map(e=>[e.id, e.t+(e.es?' · '+e.es:'')+(e.rng?' '+e.rng:'')+(e.c==='L'?' (Legends)':'')]).sort((a,b)=>collator.compare(a[1],b[1]));
+    const r = await modal({title:'Vincular «'+s.name+'» a la cronología', text:'Elige el cómic de la cronología al que corresponde esta serie (por ejemplo, si tu edición en español no se reconoce por el título).',
+      fields:[{id:'e',label:'Entrada de la cronología',type:'select',value:links[s.key]||'',options:[['','Automática (quitar vínculo)'],...opts]}],
+      actions:[{id:'cancel',label:'Cancelar'},{id:'save',label:'Guardar',cls:'pri'}]});
+    if(!r||r.action==='cancel') return;
+    if(r.vals.e) links[s.key] = r.vals.e; else delete links[s.key];
+    store.set('v:tllink', JSON.stringify(links));
+    status(r.vals.e ? 'Serie vinculada a la cronología' : 'Vínculo quitado'); setTimeout(()=>status(''),2500); render(); };
   const st = $('serTot'); if(st) st.onclick = async () => { const s = curSeries(); let o={}; try{ o=JSON.parse(store.get('v:stot')||'{}'); }catch(e){}
     const secM = new Map(); s.items.forEach(m=>{ const o=secOf(m); secM.set(o.k,o); }); const phs = [...secM.keys()], multi = phs.length>1, t = seriesTotal(s);
     const fields = multi ? phs.map(ph=>({id:'n'+ph,label:'Total de números · '+secM.get(ph).label,type:'number',value:o[s.key+'|'+ph]||''})) : [{id:'n',label:'Total de números',type:'number',value:o[s.key]||(t?t.n:'')}];

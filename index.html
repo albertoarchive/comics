@@ -977,7 +977,7 @@ const TL = [
   {id:'inm',x:/^Prelude to Rebellion$|^Star Wars \(1998\)$/,   k:'comic', c:'L', t:'Guerra inminente', y:-28, ap:1, era:'republica', m:/guerra inminente|imminent/i, n:'Serie Republic de los años previos a las Guerras Clon.'},
   {id:'e2',   k:'film',  c:'C', t:'Episodio II · El ataque de los clones', y:-22, era:'clon', ess:1},
   {id:'cwS',  k:'show',  c:'C', t:'Star Wars: The Clone Wars (película y serie)', d:'The Clone Wars', y:-22, era:'clon', ess:1, epn:'The Clone Wars', n:'Es la versión oficial de la guerra; la película de 2008 abre la serie.'},
-  {id:'cwC',x:/^Republic$/,   k:'comic', c:'L', t:'Las Guerras Clon (cómics Dark Horse)', y:-21, era:'clon', rec:1, m:/clon|clone/i, n:'Serie Republic: Jabiim, «Odio y miedo», «Tierra de nadie». Es Legends: choca en parte con la serie animada.'},
+  {id:'cwC',x:/^Republic$/,   k:'comic', c:'L', t:'Las Guerras Clon (Star Wars: Republic, Dark Horse)', y:-21, era:'clon', rec:1, m:/clon|clone/i, n:'Serie Republic (#46–83): Jabiim, «Odio y miedo», «Tierra de nadie». Incluye el #71, donde Asajj Ventress le hace a Anakin la cicatriz de la cara. Es Legends: choca en parte con la serie animada.'},
   {id:'oa',x:/^Obi-Wan and Anakin$/,    k:'comic', c:'C', t:'Obi-Wan y Anakin', y:-20, ap:1, era:'clon', rec:1, m:/obi-?wan/i, n:'Canon moderno; muy citada en los foros como buena entrada.'},
   {id:'e3',   k:'film',  c:'C', t:'Episodio III · La venganza de los Sith', y:-19, era:'clon', ess:1},
   {id:'dt',x:/^Dark Times|^Purge|^Out of the Wilderness|^Fire Carrier|^A Spark Remains|^Darth Vader and the /,    k:'comic', c:'L', t:'Tiempos Oscuros', y:-18, era:'imperio', rec:1, m:/tiempos oscuros|dark times/i, n:'El Imperio naciente y los Jedi supervivientes. Continúa la numeración de Republic.'},
@@ -1136,7 +1136,7 @@ function renderTimeline(filter){
   const labels = {ruta:'Mi ruta', all:'Todo', film:'Películas', show:'Series', comic:'Cómics', canon:'Canon', leg:'Legends', short:'Relatos sueltos'};
   const route = rows.filter(inRoute), routeDone = route.filter(r=>r.s.done).length;
   const q2 = filter||'';
-  const shown = rows.filter(r=>vis(r) && tests[f](r) && (!fs || stests[fs](r)) && (!q2 || r.e.t.toLowerCase().includes(q2)));
+  const shown = rows.filter(r=>vis(r) && (q2 || tests[f](r)) && (!fs || stests[fs](r)) && (!q2 || [r.e.t,r.e.es,r.e.nm,r.e.n].join(' ').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().includes(q2.normalize('NFD').replace(/[\u0300-\u036f]/g,''))));
   const nx = route.find(r=>!r.s.done);
   let nb = '';
   if(nx){ const e = nx.e, s = nx.s; let act = '', sub = '';
